@@ -35,6 +35,7 @@ $PAGE->set_context($context);
 $PAGE->set_title(get_string('preview_course', 'local_courseagent'));
 $PAGE->set_heading(get_string('preview_course', 'local_courseagent'));
 $PAGE->set_pagelayout('base');
+$PAGE->add_body_class('local-courseagent-preview-flush');
 
 $previewdata = isset($SESSION->courseagent_preview) ? $SESSION->courseagent_preview : null;
 

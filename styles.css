@@ -239,16 +239,42 @@
     color: #6c757d;
 }
 
+/* ── Native Moodle layout overrides (preview page only) ── */
+body.local-courseagent-preview-flush #page-wrapper,
+body.local-courseagent-preview-flush #page {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+}
+
+body.local-courseagent-preview-flush .main-inner,
+body.local-courseagent-preview-flush #page-content,
+body.local-courseagent-preview-flush #region-main,
+body.local-courseagent-preview-flush #region-main-box {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    border: 0 !important;
+    background: transparent !important;
+}
+
+body.local-courseagent-preview-flush #page-header,
+body.local-courseagent-preview-flush .secondary-navigation {
+    display: none;
+}
+
+body.local-courseagent-preview-flush #page.drawers div[role="main"] {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+}
+
 /* ── 3-Pane Preview Layout ── */
 #courseagent-preview-app {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 180px);
+    height: calc(100vh - 60px);
     min-height: 500px;
     overflow: hidden;
-    border-left: 1px solid #e2e8f0;
-    border-right: 1px solid #e2e8f0;
-    border-radius: .5rem;
 }
 
 /* Top bar */

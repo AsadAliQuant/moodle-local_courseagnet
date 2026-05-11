@@ -32,3 +32,4 @@ Terser is installed globally (`terser --version` to confirm). Never manually cop
 | [.claude/docs/mdl_frankenstyle.md](.claude/docs/mdl_frankenstyle.md) | Frankenstyle plugin structure |
 | [.claude/docs/mdl_plugin_codechecker_erros.md](.claude/docs/mdl_plugin_codechecker_erros.md) | Codechecker error fixes |
 | [.claude/docs/mdl_sql.md](.claude/docs/mdl_sql.md) | SQL coding standards |
+| [.claude/docs/moodle-native-layout.md](.claude/docs/moodle-native-layout.md) | How to make a plugin page fully flush/edge-to-edge (remove iframe/card feel) |
