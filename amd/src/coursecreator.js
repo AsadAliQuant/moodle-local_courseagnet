@@ -6,14 +6,16 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Ajax, Notification, Str) {
+define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
+    function($, Ajax, Notification, Str, CoreConfig) {
 
     'use strict';
 
     let config = {};
-    let extractedFileText = '';   // Text extracted from the uploaded file (server-side).
-    let progressTimer = null;    // Interval timer for progress animation.
-    let generateXhr = null;      // Reference to the generate AJAX request for cancellation.
+    let strings = {};
+    let extractedFileText = '';
+    let progressTimer = null;
+    let generateXhr = null;
 
     // Accepted MIME types / extensions.
     const ACCEPTED_EXTS = ['txt','pdf','docx','pptx','odt','rtf','md','csv','epub'];
@@ -27,7 +29,46 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         config = userConfig;
         setupEventListeners();
         setupDropzone();
-        updateModelSelector();
+
+        Str.get_strings([
+            {key: 'js:auto_select',               component: 'local_courseagent'},
+            {key: 'js:auto_select_first',          component: 'local_courseagent'},
+            {key: 'js:unsupported_filetype',       component: 'local_courseagent'},
+            {key: 'js:file_too_large',             component: 'local_courseagent'},
+            {key: 'js:could_not_extract',          component: 'local_courseagent'},
+            {key: 'js:upload_failed',              component: 'local_courseagent'},
+            {key: 'js:extracting_text',            component: 'local_courseagent'},
+            {key: 'js:characters_extracted',       component: 'local_courseagent'},
+            {key: 'js:please_enter_topic',         component: 'local_courseagent'},
+            {key: 'js:sections_range_error',       component: 'local_courseagent', param: userConfig.maxSections},
+            {key: 'js:failed_generate',            component: 'local_courseagent'},
+            {key: 'js:error_generating',           component: 'local_courseagent'},
+            {key: 'js:generation_cancelled',       component: 'local_courseagent'},
+            {key: 'js:adding_quizzes_assignments', component: 'local_courseagent'},
+            {key: 'js:adding_quizzes',             component: 'local_courseagent'},
+            {key: 'js:adding_assignments',         component: 'local_courseagent'},
+        ]).then(function(s) {
+            strings = {
+                autoSelect:               s[0],
+                autoSelectFirst:          s[1],
+                unsupportedFiletype:      s[2],
+                fileTooLarge:             s[3],
+                couldNotExtract:          s[4],
+                uploadFailed:             s[5],
+                extractingText:           s[6],
+                charactersExtracted:      s[7],
+                pleaseEnterTopic:         s[8],
+                sectionsRangeError:       s[9],
+                failedGenerate:           s[10],
+                errorGenerating:          s[11],
+                generationCancelled:      s[12],
+                addingQuizzesAssignments: s[13],
+                addingQuizzes:            s[14],
+                addingAssignments:        s[15],
+            };
+            updateModelSelector();
+            return strings;
+        }).catch(Notification.exception);
     };
 
     // -------------------------------------------------------------------------
@@ -61,7 +102,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         const providerId = $('#ai-provider').val();
         const $modelSelect = $('#ai-model');
         $modelSelect.empty();
-        $modelSelect.append('<option value="">' + (config.providers[providerId] ? 'Auto-select (first available)' : 'Auto-select') + '</option>');
+        $modelSelect.append('<option value="">' + (config.providers[providerId] ? strings.autoSelectFirst : strings.autoSelect) + '</option>');
 
         if (config.providers[providerId] && config.providers[providerId].models) {
             config.providers[providerId].models.forEach(function(model) {
@@ -124,7 +165,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         const ext = file.name.split('.').pop().toLowerCase();
         if (ACCEPTED_EXTS.indexOf(ext) === -1) {
             Notification.addNotification({
-                message: 'Unsupported file type ".' + ext + '". Please upload: TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, or EPUB.',
+                message: strings.unsupportedFiletype.replace('{$a}', ext),
                 type: 'error'
             });
             return;
@@ -133,7 +174,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         // Validate size.
         if (file.size > MAX_FILE_BYTES) {
             Notification.addNotification({
-                message: 'File is too large (' + formatBytes(file.size) + '). Maximum allowed size is 50 MB.',
+                message: strings.fileTooLarge.replace('{$a}', formatBytes(file.size)),
                 type: 'error'
             });
             return;
@@ -145,11 +186,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         // Upload to server for text extraction.
         const formData = new FormData();
         formData.append('action', 'extract_content');
-        formData.append('sesskey', config.sesskey);
+        formData.append('sesskey', CoreConfig.sesskey);
         formData.append('file', file);
 
         $.ajax({
-            url: config.wwwroot + '/local/courseagent/ajax.php',
+            url: CoreConfig.wwwroot + '/local/courseagent/ajax.php',
             type: 'POST',
             data: formData,
             processData: false,
@@ -163,14 +204,14 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
                 } else {
                     showDropzoneState('idle');
                     Notification.addNotification({
-                        message: response.error || 'Could not extract text from the file.',
+                        message: response.error || strings.couldNotExtract,
                         type: 'error'
                     });
                 }
             },
             error: function(xhr) {
                 showDropzoneState('idle');
-                let msg = 'Failed to upload file for extraction.';
+                let msg = strings.uploadFailed;
                 try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
                 Notification.addNotification({ message: msg, type: 'error' });
             }
@@ -203,7 +244,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
             $inner.hide();
             $info.removeClass('d-none');
             $('#upload-filename').text(name);
-            $('#upload-charcount').html('<i class="fa fa-spinner fa-spin"></i> Extracting text...');
+            $('#upload-charcount').html('<i class="fa fa-spinner fa-spin"></i> ' + strings.extractingText);
             $('#upload-dropzone').addClass('has-file');
         } else if (state === 'done') {
             $inner.hide();
@@ -211,7 +252,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
             $('#upload-filename').text(name);
             $('#upload-charcount').html(
                 '<i class="fa fa-check-circle text-success"></i> ' +
-                chars.toLocaleString() + ' characters extracted'
+                strings.charactersExtracted.replace('{$a}', chars.toLocaleString())
             );
             $('#upload-dropzone').addClass('has-file');
         }
@@ -240,7 +281,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         // Require topic OR uploaded file.
         if (!topic && !extractedFileText) {
             Notification.addNotification({
-                message: 'Please enter a course topic.',
+                message: strings.pleaseEnterTopic,
                 type: 'error'
             });
             return;
@@ -248,7 +289,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
 
         if (numSections < 2 || numSections > config.maxSections) {
             Notification.addNotification({
-                message: 'Number of sections must be between 2 and ' + config.maxSections,
+                message: strings.sectionsRangeError,
                 type: 'error'
             });
             return;
@@ -268,54 +309,85 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
             usesvg:            useSvg ? 1 : 0,
             provider:          $('#ai-provider').val() || 0,
             model:             $('#ai-model').val() || '',
-            sesskey:           config.sesskey,
+            sesskey:           CoreConfig.sesskey,
             extracted_content: extractedFileText,
             custom_title:      customTitle
         };
 
+        console.log('[CA DEBUG] Sending generate request:', {
+            topic: requestData.topic,
+            provider: requestData.provider,
+            model: requestData.model,
+            numsections: requestData.numsections,
+            includequiz: requestData.includequiz,
+            includeassignment: requestData.includeassignment,
+            url: CoreConfig.wwwroot + '/local/courseagent/ajax.php'
+        });
+
         generateXhr = $.ajax({
-            url:      config.wwwroot + '/local/courseagent/ajax.php',
+            url:      CoreConfig.wwwroot + '/local/courseagent/ajax.php',
             type:     'POST',
             data:     requestData,
             dataType: 'json',
             success:  function(response) {
                 generateXhr = null;
+                console.log('[CA DEBUG] Generate success response:', response);
 
                 if (response.success) {
-                    window.location.href = config.wwwroot + '/local/courseagent/preview.php';
+                    var redirectUrl = CoreConfig.wwwroot + '/local/courseagent/preview.php';
+                    console.log('[CA DEBUG] Redirecting to:', redirectUrl);
+                    console.log('[CA DEBUG] used_provider:', response.used_provider, '| used_model:', response.used_model);
+                    if (response.fallback_log && response.fallback_log.length > 0) {
+                        console.warn('[CA FALLBACK LOG] ' + response.fallback_log.length + ' attempt(s) before success:');
+                        console.table(response.fallback_log);
+                    } else {
+                        console.log('[CA FALLBACK LOG] First attempt succeeded — no fallbacks needed.');
+                    }
+                    window.location.href = redirectUrl;
                     return;
                 }
 
+                console.warn('[CA DEBUG] response.success=false. Error:', response.error);
                 hideProgress();
                 $('#btn-generate').prop('disabled', false);
                 Notification.addNotification({
-                    message: response.error || 'Failed to generate course',
+                    message: response.error || strings.failedGenerate,
                     type:    'error'
                 });
             },
             error: function(xhr) {
                 generateXhr = null;
+                console.error('[CA DEBUG] XHR error. status:', xhr.status, 'statusText:', xhr.statusText);
+                console.error('[CA DEBUG] Raw responseText:', xhr.responseText);
                 // Aborted requests have status 0 — don't show error for user-initiated cancel.
                 if (xhr.status === 0 && xhr.statusText === 'abort') {
+                    console.log('[CA DEBUG] Request was user-cancelled (abort).');
                     return;
                 }
                 hideProgress();
                 $('#btn-generate').prop('disabled', false);
-                let msg = 'An error occurred while generating the course';
+                let msg = strings.errorGenerating;
                 let parsed = null;
                 try {
                     parsed = JSON.parse(xhr.responseText);
                     msg = parsed.error || msg;
                 } catch (e) {
-                    console.error('[Course Agent] Server did not return valid JSON. Raw response text:', xhr.responseText);
+                    console.error('[CA DEBUG] Server did not return valid JSON. Raw response text:', xhr.responseText);
+                    console.error('[CA DEBUG] This is likely a PHP fatal error (OOM/timeout) — check PHP error_log.');
                 }
                 if (parsed) {
-                    console.error('[Course Agent] Server returned error object:', parsed);
+                    console.error('[CA DEBUG] Server returned error object:', parsed);
                     if (parsed.debug) {
-                        console.error('[Course Agent] Debug info from server:', parsed.debug);
+                        console.error('[CA DEBUG] Debug info from server:', parsed.debug);
+                    }
+                    if (parsed.fallback_log && parsed.fallback_log.length > 0) {
+                        console.error('[CA FALLBACK LOG] ' + parsed.fallback_log.length + ' failed attempt(s) before giving up:');
+                        console.table(parsed.fallback_log);
+                    } else {
+                        console.error('[CA FALLBACK LOG] No fallback_log in error response (PHP crashed before fallback loop completed).');
                     }
                 }
-                console.error('[Course Agent] Error message shown to user:', msg);
+                console.error('[CA DEBUG] Error message shown to user:', msg);
                 Notification.addNotification({ message: msg, type: 'error' });
             }
         });
@@ -329,7 +401,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         hideProgress();
         $('#btn-generate').prop('disabled', false);
         Notification.addNotification({
-            message: 'Course generation cancelled.',
+            message: strings.generationCancelled,
             type:    'info'
         });
     };
@@ -354,11 +426,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
             $extras.show();
             var label = '';
             if (includeQuiz && includeAssignment) {
-                label = 'Adding quizzes and assignments';
+                label = strings.addingQuizzesAssignments;
             } else if (includeQuiz) {
-                label = 'Adding quizzes';
+                label = strings.addingQuizzes;
             } else {
-                label = 'Adding assignments';
+                label = strings.addingAssignments;
             }
             $extras.find('.ca-step-label').text(label);
         }
@@ -405,9 +477,9 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str'], function($, Aja
         // Poll server for real progress updates (for progress bar only).
         progressTimer = setInterval(function() {
             $.ajax({
-                url:  config.wwwroot + '/local/courseagent/ajax.php',
+                url:  CoreConfig.wwwroot + '/local/courseagent/ajax.php',
                 type: 'POST',
-                data: { action: 'get_progress', sesskey: config.sesskey },
+                data: { action: 'get_progress', sesskey: CoreConfig.sesskey },
                 dataType: 'json',
                 success: function(resp) {
                     if (resp.success && resp.progress) {

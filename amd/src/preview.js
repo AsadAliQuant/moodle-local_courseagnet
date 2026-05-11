@@ -11,25 +11,46 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     'use strict';
 
     let config = {};
+    let strings = {};  // Language strings from PHP.
     let state = {
         currentSectionIndex: 0,
         currentTab: 'content',
         expandedSections: new Set([0]),
-        chatMessages: [
-            {
-                type: 'ai',
-                text: "I've drafted the initial content for the course. Review the sections in the sidebar and let me know if you'd like any changes."
-            }
-        ],
-        quickActions: [
-            'Add 10 more questions to section 2 quiz',
-            'Remove assignment from section 3',
-            'Make section 1 more advanced'
-        ]
+        chatMessages: [],
+        quickActions: [],
+        chatHistory: []  // Mirrors session history — used for optimistic display tracking.
     };
 
-    const init = function(userConfig) {
-        config = userConfig;
+    var chatXhr = null;
+    var chatLoading = false;
+
+    const init = function() {
+        // Read config from inline script tag (bypasses js_call_amd 1024 char limit).
+        var configEl = document.getElementById('ca-config-data');
+        if (configEl) {
+            try {
+                var userConfig = JSON.parse(configEl.textContent);
+                config = userConfig;
+                strings = config.strings || {};
+            } catch (e) {
+                console.error('Failed to parse ca-config-data:', e);
+                strings = {};
+            }
+        } else {
+            // Fallback: empty config (shouldn't happen in normal flow).
+            strings = {};
+        }
+
+        // Populate dynamic state with language strings.
+        state.chatMessages = [
+            { type: 'ai', text: strings.aiInitialMsg }
+        ];
+        state.quickActions = [
+            strings.quickaction1,
+            strings.quickaction2,
+            strings.quickaction3
+        ];
+
         var dataEl = document.getElementById('ca-preview-data');
         if (dataEl) {
             try {
@@ -39,10 +60,23 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             }
         }
         if (config.courseData) {
-            $('#ca-course-title').text(config.courseData.title || 'Untitled Course');
+            $('#ca-course-title').text(config.courseData.title || strings.untitledCourse);
             renderAll();
         }
         setupEventListeners();
+    };
+
+    // Track which item is currently selected for editing.
+    var currentEditContext = {
+        targetType: null,   // 'lesson', 'quiz', 'question', 'assignment'
+        targetIndex: 0,   // section index
+        questionIndex: null // null unless targetType === 'question'
+    };
+
+    const updateEditContext = function(targetType, targetIndex, questionIndex) {
+        currentEditContext.targetType = targetType;
+        currentEditContext.targetIndex = targetIndex;
+        currentEditContext.questionIndex = questionIndex;
     };
 
     const renderAll = function() {
@@ -63,7 +97,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             html += '<div class="ca-tree-section">';
             html += '<button class="ca-tree-section-header' + (isExpanded ? ' is-expanded' : '') + '" data-index="' + index + '">';
             html += '<i class="fa fa-chevron-' + (isExpanded ? 'down' : 'right') + ' ca-tree-chevron"></i>';
-            html += '<span class="ca-tree-section-title">Section ' + sectionNum + ': ' + escapeHtml(section.name) + '</span>';
+            html += '<span class="ca-tree-section-title">' + strings.sectionLabel.replace('{$a}', sectionNum) + ': ' + escapeHtml(section.name) + '</span>';
             html += '</button>';
 
             if (isExpanded) {
@@ -75,7 +109,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '<a href="#" class="ca-tree-item' + (isActive ? ' is-active' : '') + '" ' +
                             'data-section="' + index + '" data-tab="content">';
                     html += '<i class="fa fa-file-alt ca-tree-item-icon"></i>';
-                    html += '<span class="ca-tree-item-label">Lesson: ' + escapeHtml(section.name) + '</span>';
+                    html += '<span class="ca-tree-item-label">' + strings.lessonLabel + ': ' + escapeHtml(section.name) + '</span>';
                     html += '</a>';
                 }
 
@@ -85,7 +119,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '<a href="#" class="ca-tree-item' + (isQuizActive ? ' is-active' : '') + '" ' +
                             'data-section="' + index + '" data-tab="quiz">';
                     html += '<i class="fa fa-question-circle ca-tree-item-icon"></i>';
-                    html += '<span class="ca-tree-item-label">Quiz (' + section.quiz.questions.length + ')</span>';
+                    html += '<span class="ca-tree-item-label">' + strings.quizCount.replace('{$a}', section.quiz.questions.length) + '</span>';
                     html += '</a>';
                 }
 
@@ -95,7 +129,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '<a href="#" class="ca-tree-item' + (isAssignActive ? ' is-active' : '') + '" ' +
                             'data-section="' + index + '" data-tab="assignment">';
                     html += '<i class="fa fa-tasks ca-tree-item-icon"></i>';
-                    html += '<span class="ca-tree-item-label">Assignment</span>';
+                    html += '<span class="ca-tree-item-label">' + strings.assignmentLabel + '</span>';
                     html += '</a>';
                 }
 
@@ -118,38 +152,12 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         var hasQuiz = !!(section.quiz && section.quiz.questions && section.quiz.questions.length > 0);
         var hasAssignment = !!section.assignment;
 
-        // Auto-switch tab if current one isn't available for this section.
-        if (state.currentTab === 'content' && !hasLesson) {
-            state.currentTab = hasQuiz ? 'quiz' : (hasAssignment ? 'assignment' : 'content');
-        } else if (state.currentTab === 'quiz' && !hasQuiz) {
-            state.currentTab = hasLesson ? 'content' : (hasAssignment ? 'assignment' : 'content');
-        } else if (state.currentTab === 'assignment' && !hasAssignment) {
-            state.currentTab = hasLesson ? 'content' : (hasQuiz ? 'quiz' : 'content');
-        }
-
+        
         var html = '';
 
-        // Tabs.
-        html += '<div class="ca-main-tabs">';
-        html += '<button class="ca-main-tab' + (state.currentTab === 'content' ? ' is-active' : '') + '" data-tab="content">';
-        html += '<i class="fa fa-edit"></i> Content';
-        html += '</button>';
-        if (hasQuiz) {
-            html += '<button class="ca-main-tab' + (state.currentTab === 'quiz' ? ' is-active' : '') + '" data-tab="quiz">';
-            html += '<i class="fa fa-question-circle"></i> Quiz Questions';
-            html += '</button>';
-        }
-        if (hasAssignment) {
-            html += '<button class="ca-main-tab' + (state.currentTab === 'assignment' ? ' is-active' : '') + '" data-tab="assignment">';
-            html += '<i class="fa fa-tasks"></i> Assignment Details';
-            html += '</button>';
-        }
-        html += '</div>';
-
-        // Content area.
         html += '<div class="ca-main-content">';
         html += '<div class="ca-main-card">';
-        html += '<div class="ca-ai-badge"><i class="fa fa-magic"></i> AI Generated</div>';
+        html += '<div class="ca-ai-badge"><i class="fa fa-magic"></i> ' + strings.aiGenerated + '</div>';
 
         if (state.currentTab === 'content') {
             html += renderLessonContent(section);
@@ -168,7 +176,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     const renderLessonContent = function(section) {
         var html = '';
         if (!section.lesson) {
-            html += '<p class="text-muted">No lesson content for this section.</p>';
+            html += '<p class="text-muted">' + strings.noLessonContent + '</p>';
             return html;
         }
 
@@ -182,7 +190,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         if (lesson.content_html) {
             html += '<div class="ca-content-body">' + lesson.content_html + '</div>';
         } else {
-            html += '<p class="text-muted">No content available.</p>';
+            html += '<p class="text-muted">' + strings.noContentAvailable + '</p>';
         }
 
         return html;
@@ -191,15 +199,15 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     const renderQuizContent = function(section) {
         var html = '';
         if (!section.quiz || !section.quiz.questions || section.quiz.questions.length === 0) {
-            html += '<p class="text-muted">No quiz for this section.</p>';
+            html += '<p class="text-muted">' + strings.noQuiz + '</p>';
             return html;
         }
 
-        html += '<h1 class="ca-content-title">Quiz: ' + escapeHtml(section.name) + '</h1>';
+            html += '<h1 class="ca-content-title">' + strings.quizCount.replace('{$a}', escapeHtml(section.name)) + '</h1>';
 
         section.quiz.questions.forEach(function(q, qi) {
             var correctIdx = (typeof q.correct_answer === 'number') ? q.correct_answer : -1;
-            html += '<div class="ca-quiz-question">';
+            html += '<div class="ca-quiz-question" data-question-index="' + qi + '">';
             html += '<div class="ca-quiz-question-header">';
             html += '<span class="ca-quiz-number">Q' + (qi + 1) + '</span>';
             html += '<span class="ca-quiz-qtext">' + escapeHtml(q.question) + '</span>';
@@ -212,7 +220,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '<span class="ca-quiz-opt-marker">' + String.fromCharCode(65 + oi) + '.</span>';
                     html += '<span class="ca-quiz-opt-text">' + escapeHtml(opt) + '</span>';
                     if (isCorrect) {
-                        html += '<span class="ca-quiz-correct-badge"><i class="fa fa-check"></i> Correct</span>';
+                        html += '<span class="ca-quiz-correct-badge"><i class="fa fa-check"></i> ' + strings.correct + '</span>';
                     }
                     html += '</li>';
                 });
@@ -230,12 +238,12 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     const renderAssignmentContent = function(section) {
         var html = '';
         if (!section.assignment) {
-            html += '<p class="text-muted">No assignment for this section.</p>';
+            html += '<p class="text-muted">' + strings.noAssignment + '</p>';
             return html;
         }
 
         var a = section.assignment;
-        html += '<h1 class="ca-content-title">Assignment: ' + escapeHtml(a.title || section.name) + '</h1>';
+        html += '<h1 class="ca-content-title">' + strings.assignmentLabel + ': ' + escapeHtml(a.title || section.name) + '</h1>';
 
         if (a.description) {
             html += '<p class="ca-content-lead">' + escapeHtml(a.description) + '</p>';
@@ -243,7 +251,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
 
         if (a.instructions && a.instructions.length > 0) {
             html += '<div class="ca-info-box">';
-            html += '<h3 class="ca-info-box-title"><i class="fa fa-lightbulb"></i> Instructions</h3>';
+            html += '<h3 class="ca-info-box-title"><i class="fa fa-lightbulb"></i> ' + strings.instructions + '</h3>';
             html += '<ol class="ca-assignment-instructions">';
             a.instructions.forEach(function(inst) {
                 html += '<li>' + escapeHtml(inst) + '</li>';
@@ -253,7 +261,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         }
 
         if (a.word_count) {
-            html += '<p class="ca-meta"><i class="fa fa-file-text-o"></i> Expected length: <strong>' + a.word_count + ' words</strong></p>';
+            html += '<p class="ca-meta"><i class="fa fa-file-text-o"></i> ' + strings.expectedLength + ' <strong>' + a.word_count + ' ' + strings.words + '</strong></p>';
         }
 
         return html;
@@ -266,7 +274,20 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             if (msg.type === 'ai') {
                 messagesHtml += '<div class="ca-chat-message ca-chat-message--ai">';
                 messagesHtml += '<div class="ca-chat-avatar ca-chat-avatar--ai"><i class="fa fa-robot"></i></div>';
-                messagesHtml += '<div class="ca-chat-bubble ca-chat-bubble--ai">' + escapeHtml(msg.text) + '</div>';
+                if (msg.isTyping) {
+                    messagesHtml += '<div class="ca-chat-bubble ca-chat-bubble--ai"><div class="ca-typing-indicator"><span></span><span></span><span></span></div></div>';
+                } else if (msg.isPlan) {
+                    // Plan message — show plan text + Confirm/Cancel buttons.
+                    messagesHtml += '<div class="ca-chat-bubble ca-chat-bubble--ai">';
+                    messagesHtml += escapeHtml(msg.text);
+                    messagesHtml += '<div class="ca-plan-actions">';
+                    messagesHtml += '<button class="ca-plan-confirm btn btn-sm btn-success">Yes, do it</button>';
+                    messagesHtml += '<button class="ca-plan-cancel btn btn-sm btn-secondary">Cancel</button>';
+                    messagesHtml += '</div>';
+                    messagesHtml += '</div>';
+                } else {
+                    messagesHtml += '<div class="ca-chat-bubble ca-chat-bubble--ai">' + escapeHtml(msg.text) + '</div>';
+                }
                 messagesHtml += '</div>';
             } else {
                 messagesHtml += '<div class="ca-chat-message ca-chat-message--user">';
@@ -290,20 +311,196 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         if (container) { container.scrollTop = container.scrollHeight; }
     };
 
+    const applyDelta = function(courseData, delta) {
+        var sections = courseData.sections || [];
+        var op = delta.op;
+        var sectionIdx = delta.section_index;
+        var targetType = delta.target_type;
+
+        if (targetType === 'section') {
+            if (op === 'add') {
+                sections.push(delta.data);
+                state.expandedSections.add(sections.length - 1);
+                state.currentSectionIndex = sections.length - 1;
+            } else if (op === 'delete') {
+                sections.splice(sectionIdx, 1);
+                state.currentSectionIndex = Math.max(0, sectionIdx - 1);
+            } else {
+                sections[sectionIdx] = delta.data;
+            }
+        } else {
+            var section = sections[sectionIdx];
+            if (!section) { return courseData; }
+
+            if (targetType === 'lesson') {
+                section.lesson = delta.data;
+                state.currentSectionIndex = sectionIdx;
+                state.currentTab = 'content';
+            } else if (targetType === 'quiz') {
+                section.quiz = delta.data;
+                state.currentSectionIndex = sectionIdx;
+                state.currentTab = 'quiz';
+            } else if (targetType === 'question') {
+                if (!section.quiz) { section.quiz = { name: 'Quiz', questions: [] }; }
+                if (op === 'add') {
+                    section.quiz.questions.push(delta.data);
+                } else if (op === 'delete') {
+                    section.quiz.questions.splice(delta.question_index, 1);
+                } else {
+                    section.quiz.questions[delta.question_index] = delta.data;
+                }
+                state.currentSectionIndex = sectionIdx;
+                state.currentTab = 'quiz';
+            } else if (targetType === 'assignment') {
+                section.assignment = delta.data;
+                state.currentSectionIndex = sectionIdx;
+                state.currentTab = 'assignment';
+            }
+        }
+
+        courseData.sections = sections;
+        return courseData;
+    };
+
+    const setChatButtonMode = function(mode) {
+        var $btn = $('#ca-chat-send');
+        if (mode === 'stop') {
+            $btn.find('.ca-icon-send').hide();
+            $btn.find('.ca-icon-stop').show();
+            $btn.addClass('is-loading').attr('title', 'Cancel');
+        } else {
+            $btn.find('.ca-icon-stop').hide();
+            $btn.find('.ca-icon-send').show();
+            $btn.removeClass('is-loading').attr('title', 'Send');
+        }
+    };
+
     const sendChatMessage = function(text) {
         if (!text.trim()) { return; }
+        if (chatLoading) { return; }
+        chatLoading = true;
+        setChatButtonMode('stop');
+
         state.chatMessages.push({ type: 'user', text: text.trim() });
         renderChat();
 
-        // Simulate AI response.
-        setTimeout(function() {
-            state.chatMessages.push({
-                type: 'ai',
-                text: "I've noted your request: \"" + text.trim() + "\". I'll update the course content accordingly. (This is a placeholder — connect to the AI agent backend for real modifications.)"
-            });
-            renderChat();
-        }, 800);
+        state.chatMessages.push({ type: 'ai', text: '...', isTyping: true });
+        renderChat();
+
+        var payload = {
+            user_prompt: text.trim()
+            // No context_hint — AI determines target from NLP.
+            // No course_data — server reads from session.
+        };
+
+        chatXhr = $.ajax({
+            url: config.wwwroot + '/local/courseagent/ajax.php?action=ai_assist&sesskey=' + config.sesskey,
+            type: 'POST',
+            data: JSON.stringify(payload),
+            contentType: 'application/json',
+            dataType: 'json',
+            success: function(response) {
+                chatLoading = false;
+                chatXhr = null;
+                setChatButtonMode('send');
+                state.chatMessages = state.chatMessages.filter(function(m) { return !m.isTyping; });
+
+                if (response.used_provider) {
+                    console.log('[CA CHAT] used provider: ' + response.used_provider
+                        + ', model: ' + (response.used_model || '(default)'));
+                }
+                if (response.fallback_log && response.fallback_log.length > 0) {
+                    console.warn('[CA FALLBACK LOG] ' + response.fallback_log.length
+                        + ' attempt(s) before success:');
+                    console.table(response.fallback_log);
+                } else if (response.success) {
+                    console.log('[CA FALLBACK LOG] First attempt succeeded — no fallbacks needed.');
+                }
+
+                if (response.success) {
+                    var rtype = response.response_type || 'delta';
+
+                    if (rtype === 'question') {
+                        // AI asking clarifying question — no course changes.
+                        state.chatMessages.push({ type: 'ai', text: response.message || '' });
+
+                    } else if (rtype === 'plan') {
+                        // AI showing plan — display with Confirm/Cancel buttons.
+                        state.chatMessages.push({
+                            type: 'ai',
+                            text: response.message || '',
+                            isPlan: true,
+                            planSummary: response.plan_summary || ''
+                        });
+
+                    } else {
+                        // Delta — apply changes.
+                        if (response.delta) {
+                            config.courseData = applyDelta(config.courseData, response.delta);
+                        } else if (response.data) {
+                            config.courseData = response.data;
+                        }
+                        var dataEl = document.getElementById('ca-preview-data');
+                        if (dataEl) { dataEl.textContent = JSON.stringify(config.courseData); }
+                        renderAll();
+                        state.chatMessages.push({ type: 'ai', text: response.message || '' });
+                    }
+
+                    // Track history locally.
+                    state.chatHistory.push({ role: 'user',      content: text.trim() });
+                    state.chatHistory.push({ role: 'assistant', content: response.message || '' });
+                } else {
+                    state.chatMessages.push({
+                        type: 'ai',
+                        text: response.error || 'Failed to update. Please try again.'
+                    });
+                }
+                renderChat();
+            },
+            error: function(xhr) {
+                chatLoading = false;
+                chatXhr = null;
+                setChatButtonMode('send');
+                if (xhr.statusText === 'abort') { return; }
+                state.chatMessages = state.chatMessages.filter(function(m) { return !m.isTyping; });
+                var errMsg = 'Error updating. Please try again.';
+                var parsed = null;
+                try { parsed = JSON.parse(xhr.responseText); } catch (e) {
+                    console.error('[CA CHAT] Failed to parse error response — likely PHP fatal (OOM/timeout). Check PHP error_log.');
+                }
+                if (parsed) {
+                    errMsg = parsed.error || errMsg;
+                    if (parsed.fallback_log && parsed.fallback_log.length > 0) {
+                        console.error('[CA FALLBACK LOG] ' + parsed.fallback_log.length
+                            + ' failed attempt(s) before giving up:');
+                        console.table(parsed.fallback_log);
+                    } else {
+                        console.error('[CA FALLBACK LOG] No fallback_log in error response (PHP crashed before fallback loop completed).');
+                    }
+                }
+                state.chatMessages.push({ type: 'ai', text: errMsg });
+                renderChat();
+            }
+        });
     };
+
+    const clearChat = function() {
+        $.ajax({
+            url: config.wwwroot + '/local/courseagent/ajax.php?action=clear_chat&sesskey=' + config.sesskey,
+            type: 'POST',
+            data: JSON.stringify({}),
+            contentType: 'application/json',
+            dataType: 'json',
+            success: function() {
+                state.chatMessages = [{ type: 'ai', text: strings.aiInitialMsg }];
+                state.chatHistory  = [];
+                renderChat();
+            }
+        });
+    };
+
+    // Current question index when viewing quiz.
+    var currentQuestionIndex = 0;
 
     /* ── Event Listeners ── */
     const setupEventListeners = function() {
@@ -339,24 +536,72 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                 e.preventDefault();
                 var tab = $(this).data('tab');
                 state.currentTab = tab;
+                state.currentQuestionIndex = 0; // Reset question selection.
                 renderMain();
+            })
+            .on('click.courseagent', '.ca-quiz-question', function(e) {
+                e.preventDefault();
+                var qidx = parseInt($(this).data('questionIndex'), 10);
+                state.currentQuestionIndex = qidx;
+                // Update visual selection.
+                $('.ca-quiz-question').removeClass('is-selected');
+                $(this).addClass('is-selected');
             });
 
-        // Chat send.
+        // Chat send / stop.
         $('#ca-chat-send').on('click', function() {
+            if (chatLoading) {
+                if (chatXhr) { chatXhr.abort(); }
+                chatLoading = false;
+                chatXhr = null;
+                setChatButtonMode('send');
+                state.chatMessages = state.chatMessages.filter(function(m) { return !m.isTyping; });
+                state.chatMessages.push({ type: 'ai', text: 'Request cancelled.' });
+                renderChat();
+                return;
+            }
             var $input = $('#ca-chat-input');
-            sendChatMessage($input.val());
+            var val = $input.val();
             $input.val('');
+            $input[0].style.height = 'auto';
+            sendChatMessage(val);
         });
 
         $('#ca-chat-input').on('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && !chatLoading) {
                 e.preventDefault();
                 var $input = $(this);
-                sendChatMessage($input.val());
+                var val = $input.val();
                 $input.val('');
+                $input[0].style.height = 'auto';
+                sendChatMessage(val);
             }
         });
+
+        $('#ca-chat-input').on('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+        });
+
+        // Clear chat button.
+        $('#ca-chat-clear').on('click', clearChat);
+
+        // Plan confirm/cancel (delegated — buttons rendered dynamically).
+        $('#ca-chat-messages')
+            .off('click.courseagent-plan')
+            .on('click.courseagent-plan', '.ca-plan-confirm', function() {
+                // Mark plan message as resolved so buttons disappear.
+                var lastPlan = state.chatMessages.filter(function(m) { return m.isPlan; });
+                if (lastPlan.length) { lastPlan[lastPlan.length - 1].isPlan = false; }
+                renderChat();
+                sendChatMessage('yes, proceed with the plan');
+            })
+            .on('click.courseagent-plan', '.ca-plan-cancel', function() {
+                var lastPlan = state.chatMessages.filter(function(m) { return m.isPlan; });
+                if (lastPlan.length) { lastPlan[lastPlan.length - 1].isPlan = false; }
+                state.chatMessages.push({ type: 'ai', text: 'Cancelled. Let me know if you want to make a different change.' });
+                renderChat();
+            });
 
         // Quick action chips.
         $('#ca-chat-quickactions')
@@ -370,13 +615,13 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     const publishCourse = function() {
         if (!config.courseData) {
             Notification.addNotification({
-                message: 'No course data found. Please generate a course first.',
+                message: strings.noCourseData,
                 type:    'error'
             });
             return;
         }
 
-        $('#btn-publish').prop('disabled', true).html('<i class="fa fa-spinner fa-spin fa-fw"></i> Publishing...');
+        $('#btn-publish').prop('disabled', true).html('<i class="fa fa-spinner fa-spin fa-fw"></i> ' + strings.publishing);
 
         $.ajax({
             url:         config.wwwroot + '/local/courseagent/ajax.php?action=publish&sesskey=' + config.sesskey,
@@ -385,20 +630,20 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             contentType: 'application/json',
             dataType:    'json',
             success:     function(response) {
-                $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> Publish to Moodle');
+                $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> ' + strings.publishToMoodle);
                 if (response.success) {
-                    Notification.addNotification({ message: 'Course published successfully!', type: 'success' });
+                    Notification.addNotification({ message: strings.coursePublished, type: 'success' });
                     setTimeout(function() { window.location.href = response.course_url; }, 1500);
                 } else {
                     Notification.addNotification({
-                        message: response.error || 'Failed to publish course',
+                        message: response.error || strings.failedPublish,
                         type:    'error'
                     });
                 }
             },
             error: function(xhr) {
-                $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> Publish to Moodle');
-                let msg = 'An error occurred while publishing the course';
+                $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> ' + strings.publishToMoodle);
+                let msg = strings.errorPublishing;
                 try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
                 Notification.addNotification({ message: msg, type: 'error' });
             }

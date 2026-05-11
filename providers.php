@@ -199,7 +199,7 @@ if ($form) {
             } catch (\Exception $e) {
                 // Show error if create failed.
                 echo $OUTPUT->header();
-                echo $OUTPUT->notification('Error creating provider: ' . $e->getMessage(), 'notifyproblem');
+                echo $OUTPUT->notification(get_string('error_creating_provider', 'local_courseagent', $e->getMessage()), 'notifyproblem');
                 echo html_writer::div(
                     html_writer::link(
                         new moodle_url('/local/courseagent/providers.php'),
@@ -234,6 +234,117 @@ if ($form) {
     );
 
     echo $OUTPUT->heading($pageheading);
+
+    // Preset buttons — only on the Add (not Edit) page.
+    if ($isadding) {
+        $presets = [
+            'gemini' => [
+                'label'      => 'Google Gemini',
+                'icon'       => 'https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg',
+                'name'       => 'Google Gemini',
+                'baseurl'    => 'https://generativelanguage.googleapis.com',
+                'endpoint'   => 'v1beta/models/{model}:generateContent',
+                'api_format' => 'gemini',
+                'models'     => [
+                    'gemini-2.5-flash',
+                    'gemini-2.5-flash-lite',
+                    'gemini-3-flash-preview',
+                ],
+            ],
+            'nvidia_nim' => [
+                'label'      => 'NVIDIA NIM',
+                'icon'       => 'https://www.nvidia.com/favicon.ico',
+                'name'       => 'NVIDIA NIM',
+                'baseurl'    => 'https://integrate.api.nvidia.com',
+                'endpoint'   => 'v1/chat/completions',
+                'api_format' => 'openai',
+                'models'     => [
+                    'meta/llama-3.1-8b-instruct',
+                    'meta/llama-3.1-70b-instruct',
+                    'z-ai/glm4.7',
+                    'deepseek-ai/deepseek-v4-pro',
+                ],
+            ],
+        ];
+
+        $presetsjson = json_encode($presets);
+
+        echo html_writer::start_div('courseagent-presets card mb-4 border-0 bg-light');
+        echo html_writer::start_div('card-body py-3');
+        echo html_writer::tag('p',
+            html_writer::tag('i', '', ['class' => 'fa fa-bolt mr-1']) .
+            get_string('preset_quicksetup', 'local_courseagent'),
+            ['class' => 'font-weight-semibold mb-2']
+        );
+        echo html_writer::tag('p',
+            get_string('preset_quicksetup_desc', 'local_courseagent'),
+            ['class' => 'text-muted small mb-3']
+        );
+
+        $btnhtml = '';
+        foreach ($presets as $key => $p) {
+            $imghtml = html_writer::empty_tag('img', [
+                'src'    => $p['icon'],
+                'width'  => '18',
+                'height' => '18',
+                'class'  => 'mr-2',
+                'alt'    => $p['label'],
+            ]);
+            $btnhtml .= html_writer::tag('button',
+                $imghtml . $p['label'],
+                [
+                    'type'         => 'button',
+                    'class'        => 'btn btn-outline-primary btn-sm mr-2 mb-2 preset-btn',
+                    'data-preset'  => $key,
+                ]
+            );
+        }
+        echo html_writer::div($btnhtml, 'd-flex flex-wrap');
+        echo html_writer::end_div();
+        echo html_writer::end_div();
+
+        // Inline JS: read preset data and fill form fields on button click.
+        echo html_writer::tag('script', "
+(function() {
+    var presets = " . $presetsjson . ";
+
+    document.querySelectorAll('.preset-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var key = this.getAttribute('data-preset');
+            var p = presets[key];
+            if (!p) { return; }
+
+            // Fill text fields.
+            var nameEl = document.getElementById('id_name');
+            if (nameEl && !nameEl.value) { nameEl.value = p.name; }
+
+            var baseurlEl = document.getElementById('id_baseurl');
+            if (baseurlEl) { baseurlEl.value = p.baseurl; }
+
+            var endpointEl = document.getElementById('id_endpoint');
+            if (endpointEl) { endpointEl.value = p.endpoint; }
+
+            // Fill API format select.
+            var fmtEl = document.getElementById('id_api_format');
+            if (fmtEl) { fmtEl.value = p.api_format; }
+
+            // Populate the models widget via exposed global.
+            if (window.caModelsWidget) {
+                window.caModelsWidget.setModels(p.models);
+            }
+
+            // Highlight the active preset button.
+            document.querySelectorAll('.preset-btn').forEach(function(b) {
+                b.classList.remove('btn-primary');
+                b.classList.add('btn-outline-primary');
+            });
+            this.classList.remove('btn-outline-primary');
+            this.classList.add('btn-primary');
+        });
+    });
+})();
+        ");
+    }
 
     $form->display();
     echo $OUTPUT->footer();
@@ -283,7 +394,7 @@ if (empty($providers)) {
             $first     = htmlspecialchars($models[0], ENT_QUOTES);
             $modelshtml = html_writer::tag('code', $first, ['class' => 'small']);
             if ($modelcount > 1) {
-                $modelshtml .= ' ' . html_writer::tag('span', '+' . ($modelcount - 1) . ' more', ['class' => 'badge badge-light border text-muted']);
+                $modelshtml .= ' ' . html_writer::tag('span', '+' . ($modelcount - 1) . ' ' . get_string('more_models', 'local_courseagent'), ['class' => 'badge badge-light border text-muted']);
             }
         } else {
             $modelshtml = html_writer::tag('span', '—', ['class' => 'text-muted']);
@@ -312,19 +423,6 @@ if (empty($providers)) {
             ['class' => 'action-icon', 'title' => get_string('edit')]
         );
 
-        // Test connection.
-        $actions[] = html_writer::tag(
-            'a',
-            $OUTPUT->pix_icon('i/valid', get_string('provider_test', 'local_courseagent')),
-            [
-                'href'            => 'javascript:void(0)',
-                'class'           => 'action-icon ca-test-provider',
-                'data-id'         => $p->id,
-                'data-sesskey'    => sesskey(),
-                'title'           => get_string('provider_test', 'local_courseagent'),
-            ]
-        );
-
         // Set as default (only shown if not already default and is enabled).
         if (!$p->isdefault && $p->enabled) {
             $actions[] = html_writer::link(
@@ -336,7 +434,7 @@ if (empty($providers)) {
 
         // Toggle enable/disable.
         $toggleicon  = $p->enabled ? 'i/hide' : 'i/show';
-        $toggletitle = $p->enabled ? 'Disable provider' : 'Enable provider';
+        $toggletitle = $p->enabled ? get_string('disable_provider', 'local_courseagent') : get_string('enable_provider', 'local_courseagent');
         $actions[] = html_writer::link(
             new moodle_url('/local/courseagent/providers.php', ['action' => 'toggle', 'id' => $p->id, 'sesskey' => sesskey()]),
             $OUTPUT->pix_icon($toggleicon, $toggletitle),
@@ -366,193 +464,4 @@ if (empty($providers)) {
     echo html_writer::table($table);
 }
 
-// ------------------------------------------------------------------ //
-// Test Connection inline result modal (Bootstrap alert, no popup)     //
-// ------------------------------------------------------------------ //
-echo html_writer::div(
-    html_writer::div('', 'alert mb-0', ['id' => 'ca-test-result-inner']),
-    'ca-test-result-wrap mt-3',
-    ['id' => 'ca-test-result', 'style' => 'display:none; max-width:600px;']
-);
-
-// ------------------------------------------------------------------ //
-// JavaScript for test-connection                                       //
-// ------------------------------------------------------------------ //
-$js = <<<JS
-console.log('[Course Agent] Providers list page script loaded');
-console.log('[Course Agent] Found test buttons:', document.querySelectorAll('.ca-test-provider').length);
-
-document.querySelectorAll('.ca-test-provider').forEach(function(btn) {
-    console.log('[Course Agent] Attaching click handler to button:', btn.getAttribute('data-id'));
-    btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        var id      = this.getAttribute('data-id');
-        var sesskey = this.getAttribute('data-sesskey');
-        var wrap    = document.getElementById('ca-test-result');
-        var inner   = document.getElementById('ca-test-result-inner');
-
-        console.log('[Course Agent] Test button clicked for Provider ID:', id);
-
-        var requestUrl = 'providers.php?action=test&id=' + id + '&sesskey=' + sesskey;
-
-        inner.className   = 'alert mb-0 alert-info';
-        inner.textContent = 'Testing connection…';
-        wrap.style.display = 'block';
-
-        fetch(requestUrl)
-            .then(function(r) {
-                console.log('[Course Agent] HTTP Status:', r.status);
-                return r.json();
-            })
-            .then(function(data) {
-                // ===== TOP LEVEL GROUP =====
-                console.group('%c[Course Agent] Provider Test Connection Debug', 'font-size: 14px; font-weight: bold; color: #0066cc;');
-
-                // Basic Result
-                console.log('Success:', data.success);
-                console.log('Message:', data.message);
-                console.log('HTTP Code:', data.httpcode);
-
-                if (data.debug) {
-                    // ===== REQUEST CONSTRUCTION =====
-                    console.group('%c1. Request Construction', 'color: #009900; font-weight: bold;');
-                    console.log('API Type:', data.debug.api_type);
-                    console.log('Base URL:', data.debug.base_url);
-                    console.log('Endpoint:', data.debug.endpoint);
-                    console.log('Full URL Used:', data.debug.full_url);
-                    if (data.debug.request_construction) {
-                        console.group('URL Building Steps');
-                        console.log('Base URL Input:', data.debug.request_construction.url_building.base_url_input);
-                        console.log('Endpoint Input:', data.debug.request_construction.url_building.endpoint_input);
-                        console.log('URL Before Key:', data.debug.request_construction.url_building.url_before_key);
-                        console.log('Final URL Used:', data.debug.request_construction.url_building.final_url_used);
-                        console.groupEnd();
-                        console.log('Is Gemini:', data.debug.request_construction.is_gemini);
-                        console.log('Is OpenAI:', data.debug.request_construction.is_openai);
-                        console.log('API Key Present:', data.debug.request_construction.api_key_present);
-                        console.log('API Key Length:', data.debug.request_construction.api_key_length);
-                        console.log('API Key Preview:', data.debug.request_construction.api_key_preview);
-                    }
-                    console.groupEnd();
-
-                    // ===== REQUEST DETAILS =====
-                    console.group('%c2. Request Details', 'color: #009900; font-weight: bold;');
-                    console.log('Method:', data.debug.request_method);
-                    console.log('Headers (for display):', data.debug.request_headers);
-                    if (data.debug.request_construction && data.debug.request_construction.headers_sent) {
-                        console.log('Actual Headers Sent:', data.debug.request_construction.headers_sent);
-                    }
-                    if (data.debug.curl_config) {
-                        console.log('cURL Config:', data.debug.curl_config);
-                    }
-                    console.log('Payload:');
-                    console.log(JSON.stringify(data.debug.request_payload, null, 2));
-                    console.groupEnd();
-
-                    // ===== RESPONSE DETAILS =====
-                    console.group('%c3. Response Details', 'color: #cc6600; font-weight: bold;');
-                    if (data.debug.response_processing) {
-                        console.log('HTTP Code Received:', data.debug.response_processing.http_code_received);
-                        console.log('Raw Response Length:', data.debug.response_processing.raw_response_length);
-                        console.log('JSON Decode Success:', data.debug.response_processing.json_decode_success);
-                        if (data.debug.response_processing.json_decode_error) {
-                            console.error('JSON Decode Error:', data.debug.response_processing.json_decode_error);
-                        }
-                        if (data.debug.response_processing.curl_error) {
-                            console.error('cURL Error:', data.debug.response_processing.curl_error);
-                        }
-                        if (data.debug.response_processing.response_structure) {
-                            console.group('Response Structure Analysis');
-                            console.log('Type:', data.debug.response_processing.response_structure.type);
-                            console.log('Top Level Keys:', data.debug.response_processing.response_structure.top_level_keys);
-                            if (data.debug.response_processing.response_structure.candidates_type) {
-                                console.log('Candidates Type:', data.debug.response_processing.response_structure.candidates_type);
-                                console.log('Candidates Count:', data.debug.response_processing.response_structure.candidates_count);
-                                console.log('Candidate[0] Keys:', data.debug.response_processing.response_structure.candidate_0_keys);
-                                console.log('Candidate[0] Content Keys:', data.debug.response_processing.response_structure.candidate_0_content_keys);
-                                console.log('Candidate[0] Parts Type:', data.debug.response_processing.response_structure.candidate_0_parts_type);
-                                console.log('Candidate[0] Parts Count:', data.debug.response_processing.response_structure.candidate_0_parts_count);
-                            }
-                            if (data.debug.response_processing.response_structure.choices_type) {
-                                console.log('Choices Type:', data.debug.response_processing.response_structure.choices_type);
-                                console.log('Choices Count:', data.debug.response_processing.response_structure.choices_count);
-                                console.log('Choice[0] Keys:', data.debug.response_processing.response_structure.choice_0_keys);
-                                console.log('Choice[0] Message Keys:', data.debug.response_processing.response_structure.choice_0_message_keys);
-                            }
-                            if (data.debug.response_processing.response_structure.error_structure) {
-                                console.log('Error Structure:', data.debug.response_processing.response_structure.error_structure);
-                            }
-                            console.groupEnd();
-                        }
-                    }
-                    console.log('Raw Response (first 500 chars):', data.debug.response_raw ? data.debug.response_raw.substring(0, 500) : '(none)');
-                    console.log('Parsed Response:', data.debug.response_parsed);
-                    console.groupEnd();
-
-                    // ===== EXTRACTION ATTEMPTS (CRITICAL FOR DEBUGGING) =====
-                    console.group('%c4. AI Response Extraction', 'color: #cc0000; font-weight: bold;');
-                    console.log('AI Response Extracted:', data.ai_response || 'NONE - EXTRACTION FAILED');
-                    if (data.debug.extraction_attempts && data.debug.extraction_attempts.length > 0) {
-                        console.log('Extraction Steps:');
-                        data.debug.extraction_attempts.forEach(function(attempt) {
-                            var details = {
-                                exists: attempt.exists,
-                                type: attempt.type,
-                                count: attempt.count,
-                                value_preview: attempt.value_preview
-                            };
-                            if (attempt.exists) {
-                                console.log('  Step ' + attempt.step + ': Path "' + attempt.path + '"', details);
-                            } else {
-                                console.warn('  Step ' + attempt.step + ': Path "' + attempt.path + '" NOT FOUND', details);
-                            }
-                        });
-                    } else {
-                        console.warn('No extraction attempts logged');
-                    }
-                    console.groupEnd();
-
-                    // ===== TIMING =====
-                    if (data.debug.timing) {
-                        console.log('%c5. Request Duration: ' + data.debug.timing.request_duration_ms + 'ms', 'color: #9900cc; font-weight: bold;');
-                    }
-
-                    // ===== ERRORS =====
-                    if (data.debug.curl_error) {
-                        console.error('%ccURL Error:', 'font-weight: bold;', data.debug.curl_error);
-                    }
-                    if (data.debug.exception) {
-                        console.error('%cException:', 'font-weight: bold;', data.debug.exception);
-                    }
-                }
-
-                console.groupEnd(); // Close main group
-
-                // Update UI
-                if (data.success) {
-                    console.log('%c✓ SUCCESS: Connection test passed!', 'color: #009900; font-weight: bold;');
-                    inner.className   = 'alert mb-0 alert-success';
-                    inner.innerHTML   = '<strong>✓ Connection successful</strong> (HTTP ' + data.httpcode + ')' +
-                        (data.ai_response ? '<br><em>AI replied: ' + data.ai_response + '</em>' : '');
-                } else {
-                    console.error('%c✗ FAILED: Connection test failed!', 'color: #cc0000; font-weight: bold;');
-                    inner.className   = 'alert mb-0 alert-danger';
-                    inner.innerHTML   = '<strong>✗ Connection failed</strong><br>' + data.message +
-                        '<br><small class="text-muted">Check browser console for detailed debug info</small>';
-                }
-            })
-            .catch(function(err) {
-                console.error('[Course Agent] ========================================');
-                console.error('[Course Agent] ✗ AJAX/FETCH ERROR');
-                console.error('[Course Agent] ========================================');
-                console.error('[Course Agent] Error:', err);
-                console.error('[Course Agent] Error Message:', err.message);
-                inner.className   = 'alert mb-0 alert-danger';
-                inner.textContent = 'Request error: ' + err.message;
-            });
-    });
-});
-JS;
-
-echo html_writer::script($js);
 echo $OUTPUT->footer();

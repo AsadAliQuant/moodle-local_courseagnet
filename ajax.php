@@ -58,6 +58,24 @@ $action = required_param('action', PARAM_ALPHAEXT);
 
 header('Content-Type: application/json');
 
+// Catch PHP fatal errors (OOM, timeout, etc.) and return JSON instead of empty 500.
+ob_start();
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        ob_end_clean();
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success'      => false,
+            'error'        => '[FATAL] ' . $err['message'] . ' in ' . basename($err['file']) . ':' . $err['line'],
+            'fallback_log' => [],
+        ]);
+    } else {
+        ob_end_flush();
+    }
+});
+
 try {
     switch ($action) {
         case 'generate':
@@ -76,7 +94,7 @@ try {
 
             // Require at least a topic or uploaded content.
             if (empty(trim($topic)) && empty(trim($extractedcontent))) {
-                throw new Exception('Please enter a course topic or upload a document.');
+                throw new Exception(get_string('error_no_topic', 'local_courseagent'));
             }
 
             // Clear previous progress file.
@@ -84,7 +102,7 @@ try {
             $progfile = $progdir . '/progress_' . $USER->id . '.json';
             @unlink($progfile);
 
-            courseagent_write_progress(1, 10, 'Preparing course outline...');
+            courseagent_write_progress(1, 10, get_string('progress_preparing', 'local_courseagent'));
 
             // Generate course using AI.
             $api = new api();
@@ -102,13 +120,13 @@ try {
                 $usesvg
             );
 
-            courseagent_write_progress(3, 95, 'Finalizing course...');
+            courseagent_write_progress(3, 95, get_string('progress_finalizing', 'local_courseagent'));
 
             // Store in session for preview page.
             global $SESSION;
             $SESSION->courseagent_preview = $coursedata;
 
-            courseagent_write_progress(3, 100, 'Course generated successfully!');
+            courseagent_write_progress(3, 100, get_string('progress_complete', 'local_courseagent'));
 
             echo json_encode([
                 'success'       => true,
@@ -156,6 +174,11 @@ try {
             break;
 
         case 'test_provider_raw':
+            // Clean any output buffer to prevent JSON corruption
+            if (ob_get_length() > 0) {
+                ob_clean();
+            }
+
             // Test provider connection with raw parameters (for unsaved forms).
             $baseurl   = required_param('baseurl', PARAM_RAW_TRIMMED);
             $endpoint  = optional_param('endpoint', '', PARAM_RAW_TRIMMED);
@@ -164,6 +187,23 @@ try {
             $apiformat = optional_param('api_format', 'openai', PARAM_ALPHA);
 
             $result = provider::test_connection_raw($baseurl, $endpoint, $apikey, $model ?: null, $apiformat);
+
+            // TEMPORARY DEBUG: Capture the actual response
+            error_log("Course Agent - test_provider_raw result object: " . print_r($result, true));
+
+            // Also validate result has required fields
+            if (!isset($result->success)) {
+                error_log("Course Agent - ERROR: result->success is not set!");
+                $result->success = false;
+            }
+            if (!isset($result->message)) {
+                error_log("Course Agent - ERROR: result->message is not set!");
+                $result->message = 'No message set';
+            }
+            if (!isset($result->httpcode)) {
+                error_log("Course Agent - ERROR: result->httpcode is not set!");
+                $result->httpcode = 0;
+            }
 
             echo json_encode([
                 'success' => $result->success,
@@ -204,7 +244,7 @@ try {
 
             $provider = provider::get($providerid);
             if (!$provider) {
-                throw new Exception('Provider not found');
+                throw new Exception(get_string('provider_not_found', 'local_courseagent'));
             }
 
             $models = json_decode($provider->models, true) ?: [];
@@ -219,16 +259,16 @@ try {
             // Extract text from an uploaded file.
             if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
                 $errcodes = [
-                    UPLOAD_ERR_INI_SIZE   => 'File exceeds server upload_max_filesize.',
-                    UPLOAD_ERR_FORM_SIZE  => 'File exceeds form MAX_FILE_SIZE.',
-                    UPLOAD_ERR_PARTIAL    => 'File was only partially uploaded.',
-                    UPLOAD_ERR_NO_FILE    => 'No file was uploaded.',
-                    UPLOAD_ERR_NO_TMP_DIR => 'Missing temporary folder.',
-                    UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
-                    UPLOAD_ERR_EXTENSION  => 'A PHP extension stopped the upload.',
+                    UPLOAD_ERR_INI_SIZE   => get_string('upload_err_ini_size', 'local_courseagent'),
+                    UPLOAD_ERR_FORM_SIZE  => get_string('upload_err_form_size', 'local_courseagent'),
+                    UPLOAD_ERR_PARTIAL    => get_string('upload_err_partial', 'local_courseagent'),
+                    UPLOAD_ERR_NO_FILE    => get_string('upload_err_no_file', 'local_courseagent'),
+                    UPLOAD_ERR_NO_TMP_DIR => get_string('upload_err_no_tmp_dir', 'local_courseagent'),
+                    UPLOAD_ERR_CANT_WRITE => get_string('upload_err_cant_write', 'local_courseagent'),
+                    UPLOAD_ERR_EXTENSION  => get_string('upload_err_extension', 'local_courseagent'),
                 ];
                 $code = $_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE;
-                throw new Exception($errcodes[$code] ?? 'File upload failed (code ' . $code . ')');
+                throw new Exception($errcodes[$code] ?? get_string('upload_err_generic', 'local_courseagent', $code));
             }
 
             $tmppath  = $_FILES['file']['tmp_name'];
@@ -246,13 +286,87 @@ try {
             ]);
             break;
 
+        case 'edit_item':
+        case 'ai_assist':
+            // AI chat assistant or legacy targeted edit.
+            $jsondata = file_get_contents('php://input');
+            $input = json_decode($jsondata);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception(get_string('error_invalid_json', 'local_courseagent'));
+            }
+
+            $userprompt = $input->user_prompt ?? '';
+            $coursedata = $input->course_data ?? null;
+
+            // Prefer session over payload (avoids large POST body).
+            global $SESSION;
+            if (!$coursedata) {
+                $coursedata = $SESSION->courseagent_preview ?? null;
+            }
+            if (!$coursedata) {
+                throw new \Exception(get_string('error_no_preview_data', 'local_courseagent'));
+            }
+
+            $api = new api();
+
+            if ($action === 'ai_assist') {
+                if (empty($userprompt)) {
+                    throw new \Exception('User prompt is required.');
+                }
+                $result = $api->ai_assist($coursedata, $userprompt);
+            } else {
+                // Legacy targeted edit.
+                $targettype    = $input->target_type    ?? '';
+                $targetindex   = $input->target_index   ?? 0;
+                $questionindex = $input->question_index ?? null;
+                if (empty($targettype) || empty($userprompt)) {
+                    throw new \Exception(get_string('error_edit_params', 'local_courseagent'));
+                }
+                $result = $api->edit_item($coursedata, $targettype, $targetindex, $questionindex, $userprompt);
+            }
+
+            // Update session with full merged course.
+            $SESSION->courseagent_preview = $result->coursedata;
+
+            if (isset($result->delta)) {
+                echo json_encode([
+                    'success'       => true,
+                    'delta'         => $result->delta,
+                    'message'       => $result->message,
+                    'response_type' => $result->response_type ?? 'delta',
+                    'plan_summary'  => $result->plan_summary ?? null,
+                    'fallback_log'  => $result->fallback_log ?? [],
+                    'used_provider' => $result->used_provider ?? null,
+                    'used_model'    => $result->used_model ?? null,
+                ]);
+            } else {
+                echo json_encode([
+                    'success'       => true,
+                    'data'          => $result->coursedata,
+                    'message'       => $result->message,
+                    'response_type' => $result->response_type ?? 'delta',
+                    'plan_summary'  => $result->plan_summary ?? null,
+                    'fallback_log'  => $result->fallback_log ?? [],
+                    'used_provider' => $result->used_provider ?? null,
+                    'used_model'    => $result->used_model ?? null,
+                ]);
+            }
+            break;
+
+        case 'clear_chat':
+            global $SESSION;
+            $SESSION->courseagent_chat_history = [];
+            echo json_encode(['success' => true]);
+            break;
+
         default:
             throw new Exception(get_string('error_invalid_action', 'local_courseagent'));
     }
-} catch (Exception $e) {
+} catch (\Throwable $e) {
     http_response_code(400);
     echo json_encode([
         'success' => false,
-        'error' => $e->getMessage(),
+        'error' => $e->getMessage() . ' [' . basename($e->getFile()) . ':' . $e->getLine() . ']',
     ]);
 }

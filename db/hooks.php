@@ -30,4 +30,9 @@ $callbacks = [
         'callback' => [\local_courseagent\hook\navigation::class, 'extend_primary_navigation'],
         'priority' => 100,
     ],
+    [
+        'hook'     => \core\hook\output\before_footer_html_generation::class,
+        'callback' => [\local_courseagent\hook\output::class, 'before_footer'],
+        'priority' => 100,
+    ],
 ];

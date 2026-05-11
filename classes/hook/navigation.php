@@ -43,12 +43,12 @@ class navigation {
         $url = new \moodle_url('/local/courseagent/index.php');
 
         $primaryview->add(
-            get_string('pluginname', 'local_courseagent'),
+            get_string('nav_createcourse', 'local_courseagent'),
             $url,
             \navigation_node::TYPE_CUSTOM,
             'local_courseagent',
             'local_courseagent',
-            new \pix_icon('i/course', '')
+            new \pix_icon('wand', '', 'local_courseagent')
         );
     }
 }

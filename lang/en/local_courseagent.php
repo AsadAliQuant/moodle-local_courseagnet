@@ -25,14 +25,160 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['pluginname'] = 'Course Agent - AI Course Creator';
+$string['nav_createcourse'] = 'Create Course with AI';
 $string['courseagent:createcourse'] = 'Create AI generated courses';
 $string['courseagent:viewmycourses'] = 'View my AI generated courses';
+
+// My courses page button.
+$string['createwithai'] = 'Create Course with AI';
 
 // Page strings.
 $string['create_course'] = 'Create AI Course';
 $string['my_courses'] = 'My AI Courses';
 $string['course_history'] = 'Course Generation History';
 $string['coursetopic'] = 'Course Topic';
+$string['coursetopic_placeholder'] = 'Describe the main topics, learning objectives, or paste an existing syllabus outline...';
+$string['coursetopic_help'] = 'Describe the topic the AI should build the course around.';
+
+// Index page strings.
+$string['configure_settings'] = 'Configure your AI-generated curriculum settings.';
+$string['course_title'] = 'Course Title';
+$string['optional_override'] = '(Optional override)';
+$string['course_title_placeholder'] = 'Leave blank to let the AI choose a title';
+$string['upload_content'] = 'Upload Your Content';
+$string['pro_badge'] = 'PRO';
+$string['upload_content_desc'] = 'Upload a document and let the AI build the course directly from your material.';
+$string['click_to_upload'] = 'Click to upload';
+$string['or_drag_drop'] = 'or drag & drop';
+$string['accepted_file_types'] = 'TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, EPUB &mdash; max&nbsp;50&nbsp;MB';
+$string['pro_feature'] = 'Pro Feature';
+$string['pro_feature_desc'] = 'Document upload is available in the <strong>Pro version</strong>.<br>Upgrade to unlock this and other advanced features.';
+$string['difficulty_level'] = 'Difficulty Level';
+$string['level_beginner'] = 'Beginner';
+$string['level_intermediate'] = 'Intermediate';
+$string['level_advanced'] = 'Advanced';
+$string['num_sections'] = 'Number of Sections';
+$string['sections_range'] = 'Between 2 and {$a} sections.';
+$string['included_components'] = 'Included Components';
+$string['include_quizzes'] = 'Include Quizzes';
+$string['include_quizzes_desc'] = 'Generate MCQs at the end of each section';
+$string['include_assignments_label'] = 'Include Assignments';
+$string['include_assignments_desc_ui'] = 'Create practical tasks for learners';
+$string['use_emojis_label'] = 'Use Emojis';
+$string['use_emojis_desc_ui'] = 'Add relevant emojis to make content more engaging';
+$string['include_svg_diagrams'] = 'Include SVG Diagrams';
+$string['include_svg_desc_ui'] = 'Generate simple SVG illustrations where helpful';
+$string['ai_provider'] = 'AI Provider';
+$string['model_selection'] = 'Model Selection';
+$string['generate_course_btn'] = 'Generate Course';
+$string['how_it_works'] = 'How it works';
+$string['how_it_works_desc'] = 'CourseAgent uses advanced AI to instantly draft a comprehensive Moodle course structure based on your topic and parameters.';
+$string['structuring'] = 'Structuring';
+$string['structuring_desc'] = 'We analyze your topic and break it down into logical modules and lessons.';
+$string['content_generation'] = 'Content Generation';
+$string['content_generation_desc'] = 'Detailed lesson content, readings, and summaries are drafted for each section.';
+$string['review_refine'] = 'Review &amp; Refine';
+$string['review_refine_desc'] = 'You can edit everything before finalizing and publishing to Moodle.';
+$string['pro_tip'] = 'Pro Tip:';
+$string['pro_tip_desc'] = 'Be as specific as possible in the Topic field. Pasting a syllabus outline yields the best results.';
+$string['generating_course'] = 'Generating Your Course...';
+$string['generating_course_desc'] = "This may take a few seconds. We're crafting high-quality content for you.";
+$string['step_outline'] = 'Creating course outline';
+$string['step_lessons'] = 'Generating lessons';
+$string['step_extras'] = 'Adding quizzes and assignments';
+$string['cancel'] = 'Cancel';
+
+// My courses page strings.
+$string['no_courses_yet'] = 'You have not generated any courses yet.';
+$string['date_created'] = 'Date Created';
+$string['course_title_col'] = 'Course Title';
+$string['status_col'] = 'Status';
+$string['untitled_course'] = 'Untitled Course';
+$string['view_course'] = 'View Course';
+
+// Providers page strings.
+$string['error_creating_provider'] = 'Error creating provider: {$a}';
+$string['more_models'] = 'more';
+$string['disable_provider'] = 'Disable provider';
+$string['enable_provider'] = 'Enable provider';
+
+// AJAX endpoint strings.
+$string['error_no_topic'] = 'Please enter a course topic or upload a document.';
+$string['progress_preparing'] = 'Preparing course outline...';
+$string['progress_finalizing'] = 'Finalizing course...';
+$string['progress_complete'] = 'Course generated successfully!';
+$string['provider_not_found'] = 'Provider not found';
+$string['upload_err_ini_size'] = 'File exceeds server upload_max_filesize.';
+$string['upload_err_form_size'] = 'File exceeds form MAX_FILE_SIZE.';
+$string['upload_err_partial'] = 'File was only partially uploaded.';
+$string['upload_err_no_file'] = 'No file was uploaded.';
+$string['upload_err_no_tmp_dir'] = 'Missing temporary folder.';
+$string['upload_err_cant_write'] = 'Failed to write file to disk.';
+$string['upload_err_extension'] = 'A PHP extension stopped the upload.';
+$string['upload_err_generic'] = 'File upload failed (code {$a})';
+
+// Provider form strings.
+$string['baseurl_placeholder'] = 'https://api.openai.com/v1';
+$string['endpoint_placeholder'] = 'chat/completions';
+$string['no_models_yet'] = 'No models added yet. Add at least one model.';
+$string['default_model'] = 'Default model';
+$string['model_label'] = 'Model {$a}';
+$string['edit_title'] = 'Edit';
+$string['move_up'] = 'Move up';
+$string['move_down'] = 'Move down';
+$string['save'] = 'Save';
+$string['connection_successful'] = 'Connection successful';
+$string['connection_failed'] = 'Connection failed';
+$string['check_console_debug'] = 'Check browser console for detailed debug info';
+$string['request_error'] = 'Request error';
+
+// Preview page extra strings.
+$string['options'] = 'Options';
+$string['send'] = 'Send';
+
+// JS-accessible strings (passed via config from PHP).
+$string['js:auto_select'] = 'Auto-select';
+$string['js:auto_select_first'] = 'Auto-select (first available)';
+$string['js:unsupported_filetype'] = 'Unsupported file type ".{$a}". Please upload: TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, or EPUB.';
+$string['js:file_too_large'] = 'File is too large ({$a}). Maximum allowed size is 50 MB.';
+$string['js:could_not_extract'] = 'Could not extract text from the file.';
+$string['js:upload_failed'] = 'Failed to upload file for extraction.';
+$string['js:extracting_text'] = 'Extracting text...';
+$string['js:characters_extracted'] = '{$a} characters extracted';
+$string['js:please_enter_topic'] = 'Please enter a course topic.';
+$string['js:sections_range_error'] = 'Number of sections must be between 2 and {$a}';
+$string['js:failed_generate'] = 'Failed to generate course';
+$string['js:error_generating'] = 'An error occurred while generating the course';
+$string['js:generation_cancelled'] = 'Course generation cancelled.';
+$string['js:adding_quizzes_assignments'] = 'Adding quizzes and assignments';
+$string['js:adding_quizzes'] = 'Adding quizzes';
+$string['js:adding_assignments'] = 'Adding assignments';
+$string['js:ai_initial_msg'] = "I've drafted the initial content for the course. Review the sections in the sidebar and let me know if you'd like any changes.";
+$string['js:quickaction_1'] = 'Add 10 more questions to section 2 quiz';
+$string['js:quickaction_2'] = 'Remove assignment from section 3';
+$string['js:quickaction_3'] = 'Make section 1 more advanced';
+$string['js:section_label'] = 'Section {$a}';
+$string['js:lesson_label'] = 'Lesson';
+$string['js:quiz_count'] = 'Quiz ({$a})';
+$string['js:assignment_label'] = 'Assignment';
+$string['js:content_tab'] = 'Content';
+$string['js:quiz_questions_tab'] = 'Quiz Questions';
+$string['js:assignment_details_tab'] = 'Assignment Details';
+$string['js:ai_generated'] = 'AI Generated';
+$string['js:no_lesson_content'] = 'No lesson content for this section.';
+$string['js:no_content_available'] = 'No content available.';
+$string['js:no_quiz'] = 'No quiz for this section.';
+$string['js:no_assignment'] = 'No assignment for this section.';
+$string['js:correct'] = 'Correct';
+$string['js:instructions'] = 'Instructions';
+$string['js:expected_length'] = 'Expected length:';
+$string['js:words'] = 'words';
+$string['js:ai_chat_placeholder'] = 'I\'ve noted your request: "{$a}". I\'ll update the course content accordingly. (This is a placeholder — connect to the AI agent backend for real modifications.)';
+$string['js:no_course_data'] = 'No course data found. Please generate a course first.';
+$string['js:publishing'] = 'Publishing...';
+$string['js:course_published'] = 'Course published successfully!';
+$string['js:failed_publish'] = 'Failed to publish course';
+$string['js:error_publishing'] = 'An error occurred while publishing the course';
 
 // Settings strings.
 $string['settings'] = 'Course Agent Settings';
@@ -53,6 +199,8 @@ $string['provider_management'] = 'AI Provider Management';
 $string['provider_manage_link'] = 'Manage AI Providers';
 $string['provider_add'] = 'Add New Provider';
 $string['provider_add_heading'] = 'Add Provider';
+$string['preset_quicksetup'] = 'Quick Setup — choose a preset';
+$string['preset_quicksetup_desc'] = 'Click a preset to auto-fill all connection fields. Then paste your API key and click Test Connection.';
 $string['provider_edit'] = 'Edit Provider';
 $string['provider_name'] = 'Provider Name';
 $string['provider_name_desc'] = 'A short, recognisable label for this connection — for example <strong>OpenAI GPT-4o</strong> or <strong>Gemini 2.5 Flash</strong>. Shown in the provider list and model selector.';
@@ -62,15 +210,15 @@ $string['provider_apikey_desc'] = 'The secret key issued by your AI provider. It
 $string['provider_apikey_help'] = 'Your secret API key for authentication. This is encrypted with AES-256 before being saved and is never stored in plain text.';
 $string['provider_apikey_note'] = 'Leave this field as-is to keep the existing API key. Only type a new value if you want to replace it.';
 $string['provider_baseurl'] = 'Base URL';
-$string['provider_baseurl_desc'] = 'The root URL of the API — without a trailing slash. Everything else is appended to this.<br>Examples:<br>&nbsp;• <code>https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent</code> (Gemini)<br>&nbsp;• <code>https://api.openai.com/v1</code> (OpenAI)<br>&nbsp;• <code>https://api.groq.com/openai/v1</code> (Groq)';
+$string['provider_baseurl_desc'] = 'The root URL of the API — without a trailing slash. Everything else is appended to this.<br>Examples:<br>&nbsp;• <code>https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-04-17:generateContent</code> (Gemini)<br>&nbsp;• <code>https://api.openai.com/v1</code> (OpenAI)';
 $string['provider_baseurl_help'] = 'The root URL of the AI API. Do not include a trailing slash.';
 $string['provider_baseurl_invalid'] = 'Please enter a valid URL starting with http:// or https://.';
 $string['provider_endpoint'] = 'Chat Endpoint Path';
-$string['provider_endpoint_desc'] = 'The path that is appended to the Base URL to reach the chat/completion endpoint.<br>Examples:<br>&nbsp;• Leave <strong>empty</strong> if the Base URL already points directly to the endpoint (Gemini)<br>&nbsp;• <code>chat/completions</code> for OpenAI-compatible APIs<br>&nbsp;• <code>chat/completions</code> for Groq, Together AI, Mistral, etc.';
+$string['provider_endpoint_desc'] = 'The path that is appended to the Base URL to reach the chat/completion endpoint.<br>Examples:<br>&nbsp;• Leave <strong>empty</strong> if the Base URL already points directly to the endpoint (Gemini)<br>&nbsp;• <code>chat/completions</code> for OpenAI-compatible APIs';
 $string['provider_endpoint_help'] = 'The endpoint path appended to the base URL for chat/completion requests. Leave blank if the base URL is the full endpoint.';
 $string['provider_api_format'] = 'API Format';
-$string['provider_api_format_help'] = 'Select the request format this provider expects. Use <strong>OpenAI-compatible</strong> for OpenAI, OpenRouter, NVIDIA NIM, Groq, Mistral, Together AI, Ollama, LM Studio, and any other OpenAI-style endpoint. Use <strong>Google Gemini</strong> for Google AI Studio or Vertex AI endpoints — these use a different authentication and request body format.';
-$string['provider_api_format_openai'] = 'OpenAI-compatible (OpenAI, OpenRouter, NVIDIA, Groq, Mistral, Ollama...)';
+$string['provider_api_format_help'] = 'Select the request format this provider expects. Use <strong>OpenAI-compatible</strong> for OpenAI and any other OpenAI-style endpoint. Use <strong>Google Gemini</strong> for Google AI Studio or Vertex AI endpoints — these use a different authentication and request body format.';
+$string['provider_api_format_openai'] = 'OpenAI-compatible';
 $string['provider_api_format_gemini'] = 'Google Gemini (AI Studio / Vertex AI)';
 $string['provider_models'] = 'Available Models';
 $string['provider_models_desc'] = 'The model identifiers that this provider supports. The <strong>first model</strong> in the list is used as the default when generating courses. Add at least one model. Use the exact model ID from your provider\'s documentation.';
@@ -121,6 +269,8 @@ $string['error_invalid_action'] = 'Invalid action requested.';
 $string['error_invalid_json'] = 'Invalid JSON data received.';
 $string['error_course_creation_failed'] = 'Failed to create course.';
 $string['error_no_provider'] = 'No AI provider configured. Please contact your administrator.';
+$string['error_edit_params'] = 'Missing edit parameters. Please select an item to edit first.';
+$string['error_no_preview_data'] = 'No course data found. Please generate a course first.';
 
 // Privacy strings.
 $string['privacy:metadata:courseagent_sessions'] = 'Stores information about AI-generated course sessions.';

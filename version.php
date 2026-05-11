@@ -24,7 +24,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2026042112; // Primary navbar hook fix - use primary_extend instead of before_http_headers.
+$plugin->version   = 2026050901; // my/courses.php button injection - correct selectors + reactive re-render guard.
 $plugin->requires  = 2024100805; // Requires Moodle 5.0+ (compatible with 5.1).
 $plugin->component = 'local_courseagent'; // Full name of the plugin.
 $plugin->maturity  = MATURITY_STABLE;

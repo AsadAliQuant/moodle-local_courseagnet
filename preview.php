@@ -41,9 +41,77 @@ $previewdata = isset($SESSION->courseagent_preview) ? $SESSION->courseagent_prev
 $jsconfig = [
     'wwwroot' => $CFG->wwwroot,
     'sesskey' => sesskey(),
+    'strings' => [
+        'sectionLabel'          => get_string('js:section_label', 'local_courseagent'),
+        'lessonLabel'           => get_string('js:lesson_label', 'local_courseagent'),
+        'quizCount'             => get_string('js:quiz_count', 'local_courseagent'),
+        'assignmentLabel'       => get_string('js:assignment_label', 'local_courseagent'),
+        'contentTab'            => get_string('js:content_tab', 'local_courseagent'),
+        'quizQuestionsTab'      => get_string('js:quiz_questions_tab', 'local_courseagent'),
+        'assignmentDetailsTab'  => get_string('js:assignment_details_tab', 'local_courseagent'),
+        'aiGenerated'           => get_string('js:ai_generated', 'local_courseagent'),
+        'noLessonContent'       => get_string('js:no_lesson_content', 'local_courseagent'),
+        'noContentAvailable'    => get_string('js:no_content_available', 'local_courseagent'),
+        'noQuiz'                => get_string('js:no_quiz', 'local_courseagent'),
+        'noAssignment'          => get_string('js:no_assignment', 'local_courseagent'),
+        'correct'               => get_string('js:correct', 'local_courseagent'),
+        'instructions'          => get_string('js:instructions', 'local_courseagent'),
+        'expectedLength'        => get_string('js:expected_length', 'local_courseagent'),
+        'words'                 => get_string('js:words', 'local_courseagent'),
+        'aiInitialMsg'          => get_string('js:ai_initial_msg', 'local_courseagent'),
+        'quickaction1'          => get_string('js:quickaction_1', 'local_courseagent'),
+        'quickaction2'          => get_string('js:quickaction_2', 'local_courseagent'),
+        'quickaction3'          => get_string('js:quickaction_3', 'local_courseagent'),
+        'aiChatPlaceholder'     => get_string('js:ai_chat_placeholder', 'local_courseagent'),
+        'noCourseData'          => get_string('js:no_course_data', 'local_courseagent'),
+        'publishing'            => get_string('js:publishing', 'local_courseagent'),
+        'publishToMoodle'       => get_string('publish_to_moodle', 'local_courseagent'),
+        'coursePublished'       => get_string('js:course_published', 'local_courseagent'),
+        'failedPublish'         => get_string('js:failed_publish', 'local_courseagent'),
+        'errorPublishing'       => get_string('js:error_publishing', 'local_courseagent'),
+        'untitledCourse'        => get_string('untitled_course', 'local_courseagent'),
+    ],
 ];
 $PAGE->requires->css(new moodle_url('/local/courseagent/styles.css'));
-$PAGE->requires->js_call_amd('local_courseagent/preview', 'init', [$jsconfig]);
+
+// Use inline script tag for large config data (Moodle best practice).
+// js_call_amd has 1024 char limit on argument string.
+$jsconfig = [
+    'wwwroot' => $CFG->wwwroot,
+    'sesskey' => sesskey(),
+    'strings' => [
+        'sectionLabel'          => get_string('js:section_label', 'local_courseagent'),
+        'lessonLabel'           => get_string('js:lesson_label', 'local_courseagent'),
+        'quizCount'             => get_string('js:quiz_count', 'local_courseagent'),
+        'assignmentLabel'       => get_string('js:assignment_label', 'local_courseagent'),
+        'contentTab'            => get_string('js:content_tab', 'local_courseagent'),
+        'quizQuestionsTab'      => get_string('js:quiz_questions_tab', 'local_courseagent'),
+        'assignmentDetailsTab'  => get_string('js:assignment_details_tab', 'local_courseagent'),
+        'aiGenerated'           => get_string('js:ai_generated', 'local_courseagent'),
+        'noLessonContent'       => get_string('js:no_lesson_content', 'local_courseagent'),
+        'noContentAvailable'    => get_string('js:no_content_available', 'local_courseagent'),
+        'noQuiz'                => get_string('js:no_quiz', 'local_courseagent'),
+        'noAssignment'          => get_string('js:no_assignment', 'local_courseagent'),
+        'correct'               => get_string('js:correct', 'local_courseagent'),
+        'instructions'          => get_string('js:instructions', 'local_courseagent'),
+        'expectedLength'        => get_string('js:expected_length', 'local_courseagent'),
+        'words'                 => get_string('js:words', 'local_courseagent'),
+        'aiInitialMsg'          => get_string('js:ai_initial_msg', 'local_courseagent'),
+        'quickaction1'          => get_string('js:quickaction_1', 'local_courseagent'),
+        'quickaction2'          => get_string('js:quickaction_2', 'local_courseagent'),
+        'quickaction3'          => get_string('js:quickaction_3', 'local_courseagent'),
+        'aiChatPlaceholder'     => get_string('js:ai_chat_placeholder', 'local_courseagent'),
+        'noCourseData'          => get_string('js:no_course_data', 'local_courseagent'),
+        'publishing'            => get_string('js:publishing', 'local_courseagent'),
+        'publishToMoodle'       => get_string('publish_to_moodle', 'local_courseagent'),
+        'coursePublished'       => get_string('js:course_published', 'local_courseagent'),
+        'failedPublish'         => get_string('js:failed_publish', 'local_courseagent'),
+        'errorPublishing'       => get_string('js:error_publishing', 'local_courseagent'),
+        'untitledCourse'        => get_string('untitled_course', 'local_courseagent'),
+    ],
+];
+echo '<script type="application/json" id="ca-config-data">' . json_encode($jsconfig) . '</script>';
+$PAGE->requires->js_call_amd('local_courseagent/preview', 'init', []);
 
 echo $OUTPUT->header();
 ?>
@@ -56,7 +124,7 @@ echo $OUTPUT->header();
             <?php echo get_string('no_preview_data', 'local_courseagent'); ?>
             <a href="<?php echo new moodle_url('/local/courseagent/index.php'); ?>"><?php echo get_string('create_course', 'local_courseagent'); ?></a>.
         </div>
-    <?php } ?>
+    <?php endif; ?>
 
     <?php if (!empty($previewdata)) : ?>
         <script type="application/json" id="ca-preview-data"><?php echo json_encode($previewdata); ?></script>
@@ -102,28 +170,32 @@ echo $OUTPUT->header();
                         <i class="fa fa-robot ca-chat-icon" aria-hidden="true"></i>
                         <h5 class="mb-0"><?php echo get_string('agent_assistant', 'local_courseagent'); ?></h5>
                     </div>
-                    <button class="ca-chat-options-btn" id="ca-chat-options" title="Options">
-                        <i class="fa fa-ellipsis-h" aria-hidden="true"></i>
+                    <button class="ca-chat-clear-btn" id="ca-chat-clear" title="Clear chat history">
+                        <i class="fa fa-trash" aria-hidden="true"></i>
                     </button>
                 </div>
                 <div class="ca-chat-messages" id="ca-chat-messages"></div>
                 <div class="ca-chat-quickactions" id="ca-chat-quickactions"></div>
                 <div class="ca-chat-input-area">
-                    <textarea
-                        id="ca-chat-input"
-                        class="ca-chat-input"
-                        rows="2"
-                        placeholder="<?php echo get_string('chat_placeholder', 'local_courseagent'); ?>"></textarea>
-                    <button id="ca-chat-send" class="ca-chat-send" title="Send">
-                        <i class="fa fa-paper-plane" aria-hidden="true"></i>
-                    </button>
+                    <div class="ca-chat-input-wrapper">
+                        <textarea
+                            id="ca-chat-input"
+                            class="ca-chat-input"
+                            rows="2"
+                            placeholder="<?php echo get_string('chat_placeholder', 'local_courseagent'); ?>"></textarea>
+                        <button id="ca-chat-send" class="ca-chat-send" title="<?php print_string('send', 'local_courseagent'); ?>">
+                            <span class="ca-icon-send" aria-hidden="true"><img src="<?php echo $OUTPUT->image_url('arrow-up', 'local_courseagent'); ?>" alt=""></span>
+                            <span class="ca-icon-stop" aria-hidden="true" style="display:none"><img src="<?php echo $OUTPUT->image_url('square-fill', 'local_courseagent'); ?>" alt=""></span>
+                        </button>
+                    </div>
                 </div>
                 <p class="ca-chat-disclaimer"><?php echo get_string('chat_disclaimer', 'local_courseagent'); ?></p>
             </aside>
         </div>
 
         <div id="ca-provider-info" style="display:none;"></div>
-    <?php } ?>
+    <?php endif; ?>
 </div>
 
-<?php echo $OUTPUT->footer(); ?>
+<?php echo $OUTPUT->footer();
+

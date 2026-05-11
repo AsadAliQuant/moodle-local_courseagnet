@@ -12,7 +12,49 @@
       "Bash(git config *)",
       "Bash(git remote *)",
       "Bash(git push *)",
-      "Bash(git commit --amend -m ' *)"
+      "Bash(git commit --amend -m ' *)",
+      "PowerShell(start chrome \"[https://youtube.com]\\(https://youtube.com\\)\")",
+      "Bash(Get-Content version.php)",
+      "Bash(curl -s -o nul -w \"STATUS:%{http_code}\\\\nBYTES:%{size_download}\\\\n\" \"http://localhost\")",
+      "Bash(xxd)",
+      "Read(//c/xampp/php/**)",
+      "Read(//c/xampp/apache/logs/**)",
+      "Bash(npx terser *)",
+      "Bash(where terser *)",
+      "Bash(terser *)",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\xampp\\\\apache\\\\logs\\\\error.log' -Tail 200 | Select-String -Pattern 'courseagent|glm|Error|Exception|500|Fatal' -Context 0,2\")",
+      "Bash(powershell -Command \"Get-Content 'C:\\\\xampp\\\\apache\\\\logs\\\\error.log' -Tail 50 | Select-String -Pattern 'courseagent'\")",
+      "Bash(php -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\api.php\")",
+      "PowerShell(php -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\api.php\")",
+      "Bash(xxd \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\api.php\")",
+      "Bash(dir \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\amd\\\\build\\\\preview.min.js\")",
+      "Bash(php -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\provider.php\")",
+      "Bash(php -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\ajax.php\")",
+      "PowerShell(& \"c:\\\\xampp\\\\php\\\\php.exe\" -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\api.php\")",
+      "PowerShell(& \"c:\\\\xampp\\\\php\\\\php.exe\" -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\provider.php\")",
+      "PowerShell(& \"c:\\\\xampp\\\\php\\\\php.exe\" -l \"c:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\ajax.php\")",
+      "PowerShell(Get-Content \"C:\\\\xampp\\\\apache\\\\logs\\\\error.log\" -Tail 500 | Where-Object { $_ -match \"ai_assist|merge_delta|build_context|format_section\" } | Select-Object -First 20)",
+      "PowerShell(Get-Content \"C:\\\\xampp\\\\apache\\\\logs\\\\error.log\" -Tail 100 | Where-Object { $_ -match \"May 09 1[2-9]:|May 09 2\" } | Select-Object -First 30)",
+      "PowerShell(& \"C:\\\\xampp\\\\php\\\\php.exe\" -l \"C:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\classes\\\\api.php\")",
+      "PowerShell(& \"C:\\\\xampp\\\\php\\\\php.exe\" -l \"C:\\\\xampp\\\\htdocs\\\\moodle\\\\public\\\\local\\\\courseagent\\\\ajax.php\")",
+      "Read(//c/xampp/htdocs/moodle/public/lib/classes/hook/output/**)",
+      "Bash(ls c:/xampp/htdocs/moodle/public/my/ 2>&1 | head -20)",
+      "Read(//c/xampp/htdocs/moodle/public/my/**)",
+      "Bash(grep -rn \"data-region=.empty-info\\\\|empty-info\" c:/xampp/htdocs/moodle/public/blocks/myoverview/ 2>&1 | head -10)",
+      "Read(//c/xampp/htdocs/moodle/public/blocks/myoverview/**)",
+      "Read(//c/xampp/htdocs/moodle/public/lib/templates/**)",
+      "Bash(grep -rn \"empty-info\\\\|empty_info\" c:/xampp/htdocs/moodle/public/lib/templates/ 2>&1 | head)",
+      "Read(//c/Users/Asad/.claude/**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Asad\\.claude",
+      "c:\\xampp\\htdocs\\moodle\\public\\local\\courseagent\\.claude\\docs"
     ]
+  },
+  "skillOverrides": {
+    "graphify": "off"
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
   }
 }

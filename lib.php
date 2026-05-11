@@ -128,3 +128,7 @@ function local_courseagent_extend_settings_navigation(settings_navigation $setti
         $adminnode->add_node($node);
     }
 }
+
+function local_courseagent_get_icon_map() {
+    return ['local_courseagent:wand' => 'fa-wand-magic-sparkles'];
+}

@@ -34,8 +34,7 @@ use core_privacy\local\request\writer;
  */
 class provider implements
     \core_privacy\local\metadata\provider,
-    \core_privacy\local\request\core_userdata_provider
-{
+    \core_privacy\local\request\core_userdata_provider {
     /**
      * Returns meta data about this system.
      *

@@ -73,15 +73,13 @@ foreach ($providers as $p) {
     ];
 }
 
-// Pass configuration to JavaScript.
+// Pass only small config to JavaScript — strings/wwwroot/sesskey loaded in JS via core/str and core/config.
 $jsconfig = [
-    'maxSections'      => (int)  $maxsections,
-    'maxQuizQuestions' => (int)  $maxquiz,
+    'maxSections'       => (int)  $maxsections,
+    'maxQuizQuestions'  => (int)  $maxquiz,
     'enableAssignments' => (bool) $enableassignments,
-    'providers'        => $providerconfig,
+    'providers'         => $providerconfig,
     'defaultProviderId' => $defaultprovider ? $defaultprovider->id : 0,
-    'wwwroot'          => $CFG->wwwroot,
-    'sesskey'          => sesskey(),
 ];
 $PAGE->requires->css(new moodle_url('/local/courseagent/styles.css'));
 $PAGE->requires->js_call_amd('local_courseagent/coursecreator', 'init', [$jsconfig]);
@@ -92,18 +90,18 @@ echo $OUTPUT->header();
 <div id="courseagent-app">
     <div class="row">
         <div class="col-lg-8">
-            <p class="text-muted mb-3">Configure your AI-generated curriculum settings.</p>
+            <p class="text-muted mb-3"><?php print_string('configure_settings', 'local_courseagent'); ?></p>
             <div class="card mb-4">
                 <div class="card-body">
                     <form id="courseagent-form">
                         <!-- Course Title -->
                         <div class="form-group">
                             <label for="course-custom-title" class="font-weight-bold">
-                                Course Title
-                                <span class="text-muted font-weight-normal small ml-1">(Optional override)</span>
+                                <?php print_string('course_title', 'local_courseagent'); ?>
+                                <span class="text-muted font-weight-normal small ml-1"><?php print_string('optional_override', 'local_courseagent'); ?></span>
                             </label>
                             <input type="text" id="course-custom-title" class="form-control"
-                                   placeholder="Leave blank to let the AI choose a title">
+                                   placeholder="<?php print_string('course_title_placeholder', 'local_courseagent'); ?>">
                         </div>
 
                         <!-- Course Topic -->
@@ -112,9 +110,9 @@ echo $OUTPUT->header();
                                 <?php print_string('coursetopic', 'local_courseagent'); ?> <span class="text-danger">*</span>
                             </label>
                             <textarea id="course-topic" class="form-control" rows="4" maxlength="500"
-                                      placeholder="Describe the main topics, learning objectives, or paste an existing syllabus outline..."></textarea>
+                                      placeholder="<?php print_string('coursetopic_placeholder', 'local_courseagent'); ?>"></textarea>
                             <small class="form-text text-muted d-flex justify-content-between">
-                                <span>Describe the topic the AI should build the course around.</span>
+                                <span><?php print_string('coursetopic_help', 'local_courseagent'); ?></span>
                                 <span id="course-topic-counter" class="text-muted">0 / 500</span>
                             </small>
                         </div>
@@ -122,29 +120,28 @@ echo $OUTPUT->header();
                         <!-- Upload content — PRO lock -->
                         <div class="form-group mt-3">
                             <label class="font-weight-bold d-flex align-items-center">
-                                Upload Your Content
+                                <?php print_string('upload_content', 'local_courseagent'); ?>
                                 <span class="badge badge-warning ml-2" style="font-size:0.7em;">
-                                    <i class="fa fa-lock" aria-hidden="true"></i>&nbsp;PRO
+                                    <i class="fa fa-lock" aria-hidden="true"></i>&nbsp;<?php print_string('pro_badge', 'local_courseagent'); ?>
                                 </span>
                             </label>
                             <p class="text-muted small mb-2">
-                                Upload a document and let the AI build the course directly from your material.
+                                <?php print_string('upload_content_desc', 'local_courseagent'); ?>
                             </p>
                             <div class="courseagent-pro-wrapper">
                                 <div class="courseagent-dropzone courseagent-dropzone--locked" aria-hidden="true">
                                     <i class="fa fa-cloud-upload fa-2x text-muted" aria-hidden="true"></i>
-                                    <p class="mb-1 mt-2"><strong>Click to upload</strong> or drag &amp; drop</p>
+                                    <p class="mb-1 mt-2"><strong><?php print_string('click_to_upload', 'local_courseagent'); ?></strong> <?php print_string('or_drag_drop', 'local_courseagent'); ?></p>
                                     <p class="small text-muted mb-0">
-                                        TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, EPUB &mdash; max&nbsp;50&nbsp;MB
+                                        <?php print_string('accepted_file_types', 'local_courseagent'); ?>
                                     </p>
                                 </div>
                                 <div class="courseagent-pro-overlay">
                                     <div class="text-center px-4">
                                         <i class="fa fa-lock fa-2x text-warning mb-2" aria-hidden="true"></i>
-                                        <p class="font-weight-bold mb-1">Pro Feature</p>
+                                        <p class="font-weight-bold mb-1"><?php print_string('pro_feature', 'local_courseagent'); ?></p>
                                         <p class="small text-muted mb-0">
-                                            Document upload is available in the <strong>Pro version</strong>.<br>
-                                            Upgrade to unlock this and other advanced features.
+                                            <?php print_string('pro_feature_desc', 'local_courseagent'); ?>
                                         </p>
                                     </div>
                                 </div>
@@ -157,19 +154,19 @@ echo $OUTPUT->header();
                         <div class="row">
                             <!-- Level -->
                             <div class="form-group col-md-6">
-                                <label for="course-level" class="font-weight-bold">Difficulty Level</label>
+                                <label for="course-level" class="font-weight-bold"><?php print_string('difficulty_level', 'local_courseagent'); ?></label>
                                 <select id="course-level" class="custom-select">
-                                    <option value="beginner">Beginner</option>
-                                    <option value="intermediate" selected>Intermediate</option>
-                                    <option value="advanced">Advanced</option>
+                                    <option value="beginner"><?php print_string('level_beginner', 'local_courseagent'); ?></option>
+                                    <option value="intermediate" selected><?php print_string('level_intermediate', 'local_courseagent'); ?></option>
+                                    <option value="advanced"><?php print_string('level_advanced', 'local_courseagent'); ?></option>
                                 </select>
                             </div>
                             <!-- Number of Sections -->
                             <div class="form-group col-md-6">
-                                <label for="num-sections" class="font-weight-bold">Number of Sections</label>
+                                <label for="num-sections" class="font-weight-bold"><?php print_string('num_sections', 'local_courseagent'); ?></label>
                                 <input type="number" id="num-sections" class="form-control"
                                        min="2" max="<?php echo $maxsections; ?>" value="4">
-                                <small class="form-text text-muted">Between 2 and <?php echo $maxsections; ?> sections.</small>
+                                <small class="form-text text-muted"><?php print_string('sections_range', 'local_courseagent', $maxsections); ?></small>
                             </div>
                         </div>
 
@@ -177,7 +174,7 @@ echo $OUTPUT->header();
 
                         <!-- Included Components -->
                         <div class="form-group">
-                            <label class="font-weight-bold mb-3">Included Components</label>
+                            <label class="font-weight-bold mb-3"><?php print_string('included_components', 'local_courseagent'); ?></label>
 
                             <!-- Include Quizzes -->
                             <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
@@ -189,8 +186,8 @@ echo $OUTPUT->header();
                                         </span>
                                     </div>
                                     <div>
-                                        <div class="font-weight-bold">Include Quizzes</div>
-                                        <div class="small text-muted">Generate MCQs at the end of each section</div>
+                                        <div class="font-weight-bold"><?php print_string('include_quizzes', 'local_courseagent'); ?></div>
+                                        <div class="small text-muted"><?php print_string('include_quizzes_desc', 'local_courseagent'); ?></div>
                                     </div>
                                 </div>
                                 <div class="custom-control custom-switch">
@@ -210,8 +207,8 @@ echo $OUTPUT->header();
                                         </span>
                                     </div>
                                     <div>
-                                        <div class="font-weight-bold">Include Assignments</div>
-                                        <div class="small text-muted">Create practical tasks for learners</div>
+                                        <div class="font-weight-bold"><?php print_string('include_assignments_label', 'local_courseagent'); ?></div>
+                                        <div class="small text-muted"><?php print_string('include_assignments_desc_ui', 'local_courseagent'); ?></div>
                                     </div>
                                 </div>
                                 <div class="custom-control custom-switch">
@@ -219,7 +216,7 @@ echo $OUTPUT->header();
                                     <label class="custom-control-label" for="include-assignment"></label>
                                 </div>
                             </div>
-                            <?php } ?>
+                            <?php endif; ?>
 
                             <!-- Use Emojis -->
                             <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
@@ -231,8 +228,8 @@ echo $OUTPUT->header();
                                         </span>
                                     </div>
                                     <div>
-                                        <div class="font-weight-bold">Use Emojis</div>
-                                        <div class="small text-muted">Add relevant emojis to make content more engaging</div>
+                                        <div class="font-weight-bold"><?php print_string('use_emojis_label', 'local_courseagent'); ?></div>
+                                        <div class="small text-muted"><?php print_string('use_emojis_desc_ui', 'local_courseagent'); ?></div>
                                     </div>
                                 </div>
                                 <div class="custom-control custom-switch">
@@ -251,8 +248,8 @@ echo $OUTPUT->header();
                                         </span>
                                     </div>
                                     <div>
-                                        <div class="font-weight-bold">Include SVG Diagrams</div>
-                                        <div class="small text-muted">Generate simple SVG illustrations where helpful</div>
+                                        <div class="font-weight-bold"><?php print_string('include_svg_diagrams', 'local_courseagent'); ?></div>
+                                        <div class="small text-muted"><?php print_string('include_svg_desc_ui', 'local_courseagent'); ?></div>
                                     </div>
                                 </div>
                                 <div class="custom-control custom-switch">
@@ -267,7 +264,7 @@ echo $OUTPUT->header();
                         <div class="row">
                             <!-- AI Provider -->
                             <div class="form-group col-md-6">
-                                <label for="ai-provider" class="font-weight-bold">AI Provider</label>
+                                <label for="ai-provider" class="font-weight-bold"><?php print_string('ai_provider', 'local_courseagent'); ?></label>
                                 <select id="ai-provider" class="custom-select">
                                     <?php foreach ($providers as $p) : ?>
                                         <option value="<?php echo $p->id; ?>"
@@ -275,12 +272,12 @@ echo $OUTPUT->header();
                                             <?php echo format_string($p->name);
                                                   echo $p->isdefault ? ' (' . get_string('provider_default', 'local_courseagent') . ')' : ''; ?>
                                         </option>
-                                    <?php } ?>
+                                    <?php endforeach; ?>
                                 </select>
                             </div>
                             <!-- AI Model -->
                             <div class="form-group col-md-6">
-                                <label for="ai-model" class="font-weight-bold">Model Selection</label>
+                                <label for="ai-model" class="font-weight-bold"><?php print_string('model_selection', 'local_courseagent'); ?></label>
                                 <select id="ai-model" class="custom-select">
                                     <option value=""><?php print_string('provider_autoselect', 'local_courseagent'); ?></option>
                                 </select>
@@ -290,7 +287,7 @@ echo $OUTPUT->header();
                         <div class="d-flex justify-content-end mt-4">
                             <button type="button" id="btn-generate" class="btn btn-primary btn-lg">
                                 <i class="fa fa-magic fa-fw" aria-hidden="true"></i>
-                                Generate Course
+                                <?php print_string('generate_course_btn', 'local_courseagent'); ?>
                             </button>
                         </div>
                     </form>
@@ -305,10 +302,10 @@ echo $OUTPUT->header();
                 <div class="card-body">
                     <h4 class="mb-4 d-flex align-items-center">
                         <i class="fa fa-info-circle text-primary mr-2"></i>
-                        How it works
+                        <?php print_string('how_it_works', 'local_courseagent'); ?>
                     </h4>
                     <p class="text-muted small mb-4">
-                        CourseAgent uses advanced AI to instantly draft a comprehensive Moodle course structure based on your topic and parameters.
+                        <?php print_string('how_it_works_desc', 'local_courseagent'); ?>
                     </p>
                     <div class="list-group list-group-flush">
                         <div class="list-group-item px-0 d-flex align-items-start">
@@ -317,8 +314,8 @@ echo $OUTPUT->header();
                                 <i class="fa fa-list-ol text-primary"></i>
                             </span>
                             <div>
-                                <h6 class="mb-1">Structuring</h6>
-                                <p class="small text-muted mb-0">We analyze your topic and break it down into logical modules and lessons.</p>
+                                <h6 class="mb-1"><?php print_string('structuring', 'local_courseagent'); ?></h6>
+                                <p class="small text-muted mb-0"><?php print_string('structuring_desc', 'local_courseagent'); ?></p>
                             </div>
                         </div>
                         <div class="list-group-item px-0 d-flex align-items-start">
@@ -327,8 +324,8 @@ echo $OUTPUT->header();
                                 <i class="fa fa-file-text-o text-primary"></i>
                             </span>
                             <div>
-                                <h6 class="mb-1">Content Generation</h6>
-                                <p class="small text-muted mb-0">Detailed lesson content, readings, and summaries are drafted for each section.</p>
+                                <h6 class="mb-1"><?php print_string('content_generation', 'local_courseagent'); ?></h6>
+                                <p class="small text-muted mb-0"><?php print_string('content_generation_desc', 'local_courseagent'); ?></p>
                             </div>
                         </div>
                         <div class="list-group-item px-0 d-flex align-items-start">
@@ -337,8 +334,8 @@ echo $OUTPUT->header();
                                 <i class="fa fa-check-circle text-primary"></i>
                             </span>
                             <div>
-                                <h6 class="mb-1">Review &amp; Refine</h6>
-                                <p class="small text-muted mb-0">You can edit everything before finalizing and publishing to Moodle.</p>
+                                <h6 class="mb-1"><?php print_string('review_refine', 'local_courseagent'); ?></h6>
+                                <p class="small text-muted mb-0"><?php print_string('review_refine_desc', 'local_courseagent'); ?></p>
                             </div>
                         </div>
                     </div>
@@ -346,7 +343,7 @@ echo $OUTPUT->header();
                         <div class="d-flex align-items-start">
                             <i class="fa fa-lightbulb-o text-warning mr-2 mt-1"></i>
                             <p class="small text-muted mb-0">
-                                <strong>Pro Tip:</strong> Be as specific as possible in the Topic field. Pasting a syllabus outline yields the best results.
+                                <strong><?php print_string('pro_tip', 'local_courseagent'); ?></strong> <?php print_string('pro_tip_desc', 'local_courseagent'); ?>
                             </p>
                         </div>
                     </div>
@@ -367,8 +364,8 @@ echo $OUTPUT->header();
         </div>
 
         <!-- Header -->
-        <h4 class="mb-2">Generating Your Course...</h4>
-        <p class="text-muted mb-4">This may take a few seconds. We're crafting high-quality content for you.</p>
+        <h4 class="mb-2"><?php print_string('generating_course', 'local_courseagent'); ?></h4>
+        <p class="text-muted mb-4"><?php print_string('generating_course_desc', 'local_courseagent'); ?></p>
 
         <!-- Progress bar -->
         <div class="progress mb-1" style="height:6px;">
@@ -384,25 +381,25 @@ echo $OUTPUT->header();
                 <div class="ca-step-bubble">
                     <i class="fa fa-hourglass-half" aria-hidden="true"></i>
                 </div>
-                <span class="ca-step-label">Creating course outline</span>
+                <span class="ca-step-label"><?php print_string('step_outline', 'local_courseagent'); ?></span>
             </div>
             <div id="ca-step-lessons" class="ca-step ca-step-pending">
                 <div class="ca-step-bubble">2</div>
-                <span class="ca-step-label">Generating lessons</span>
+                <span class="ca-step-label"><?php print_string('step_lessons', 'local_courseagent'); ?></span>
             </div>
             <div id="ca-step-extras" class="ca-step ca-step-pending">
                 <div class="ca-step-bubble">3</div>
-                <span class="ca-step-label">Adding quizzes and assignments</span>
+                <span class="ca-step-label"><?php print_string('step_extras', 'local_courseagent'); ?></span>
             </div>
         </div>
 
         <!-- Cancel button -->
         <div class="text-center mt-4">
             <button type="button" id="btn-cancel-generate" class="btn btn-outline-secondary btn-sm">
-                <i class="fa fa-times fa-fw" aria-hidden="true"></i> Cancel
+                <i class="fa fa-times fa-fw" aria-hidden="true"></i> <?php print_string('cancel', 'local_courseagent'); ?>
             </button>
         </div>
     </div>
 </div>
 
-<?php echo $OUTPUT->footer(); ?>
+<?php echo $OUTPUT->footer();

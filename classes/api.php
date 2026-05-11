@@ -85,172 +85,157 @@ class api {
 
         $this->write_progress(1, 15, 'Building course outline...');
 
-        // Build an ordered list of (providerid, model) pairs to try.
-        // Order: requested provider+model first, then all other enabled providers in order.
-        $attempts = $this->build_fallback_attempts($providerid, $model);
+        // Build grouped list: [{providerid, providername, models:[...]}]
+        // Order: requested/default provider first, then other enabled providers.
+        $providers = $this->build_fallback_providers($providerid, $model);
 
-        $lasterror  = null;
-        $fallbacklog = [];  // Each entry: ['provider' => name, 'model' => id, 'reason' => string]
-
+        $lasterror   = null;
+        $fallbacklog = [];
         $attemptindex = 0;
-        foreach ($attempts as $attempt) {
-            try {
-                $attemptindex++;
-                $response = provider::call_api($prompt, $attempt['providerid'], $attempt['model']);
 
-                $this->write_progress(2, 65, 'AI response received, processing...');
+        foreach ($providers as $prov) {
+            $ratelimited = false;
+            foreach ($prov['models'] as $trymodel) {
+                for ($retry = 1; $retry <= 3; $retry++) {
+                    try {
+                        $attemptindex++;
+                        $response = provider::call_api($prompt, $prov['providerid'], $trymodel);
 
-                // Strip markdown code fences if present.
-                $rawresponse = trim($response);
-                if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/s', $rawresponse, $matches)) {
-                    $rawresponse = trim($matches[1]);
-                }
+                        $this->write_progress(2, 65, 'AI response received, processing...');
 
-                // DEBUG: log raw response (first 3000 chars) to server error log.
-                debugging('[CourseAgent] Raw AI response before sanitize (attempt ' . $attemptindex . '): ' . substr($rawresponse, 0, 3000));
+                        // Strip markdown code fences.
+                        $rawresponse = trim($response);
+                        $rawresponse = preg_replace('/^```(?:json)?\s*\n?/i', '', $rawresponse);
+                        $rawresponse = preg_replace('/\n?\s*```\s*$/', '', $rawresponse);
+                        $rawresponse = trim($rawresponse);
 
-                // Sanitize control characters that break json_decode().
-                // AI models (especially via OpenRouter) may inject raw control
-                // Chars (0x00-0x1F except allowed whitespace) inside JSON.
-                // String values can cause "Control character error".
-                // Step 1: Remove illegal control chars (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F).
-                $response = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $rawresponse);
-                // Step 2: Escape literal bare CR/LF/TAB inside JSON string values.
-                // A bare \n or \r inside a JSON string value is invalid; it must be \\n.
-                // We use a callback so we only touch content inside double-quoted strings.
-                $response = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"/s', function ($m) {
-                    $inner = $m[1];
-                    // Replace unescaped literal newlines/tabs with their escaped forms.
-                    $inner = preg_replace('/(?<!\\\\)\r/', '\\r', $inner);
-                    $inner = preg_replace('/(?<!\\\\)\n/', '\\n', $inner);
-                    $inner = preg_replace('/(?<!\\\\)\t/', '\\t', $inner);
-                    return '"' . $inner . '"';
-                }, $response);
+                        debugging('[CourseAgent] Raw AI response (attempt ' . $attemptindex . '): ' . substr($rawresponse, 0, 3000));
 
-                // DEBUG: log sanitized response (first 3000 chars) to server error log.
-                debugging('[CourseAgent] Sanitized AI response before json_decode (attempt ' . $attemptindex . '): ' . substr($response, 0, 3000));
+                        // Remove illegal control chars (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F).
+                        $response = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $rawresponse);
+                        // Escape bare CR/LF/TAB inside JSON string values.
+                        ini_set('pcre.backtrack_limit', 10000000);
+                        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"/s', function ($m) {
+                            $inner = $m[1];
+                            $inner = preg_replace('/(?<!\\\\)\r/', '\\r', $inner);
+                            $inner = preg_replace('/(?<!\\\\)\n/', '\\n', $inner);
+                            $inner = preg_replace('/(?<!\\\\)\t/', '\\t', $inner);
+                            return '"' . $inner . '"';
+                        }, $response);
+                        if ($sanitized !== null) {
+                            $response = $sanitized;
+                        }
 
-                $coursedata = json_decode($response);
-                if (json_last_error() !== JSON_ERROR_NONE) {
-                    // Last resort: try with deeper error recovery.
-                    $coursedata = json_decode($response, false, 512, JSON_INVALID_UTF8_IGNORE);
-                    if (json_last_error() !== JSON_ERROR_NONE) {
-                        $debugpreview = substr($response, 0, 2000);
-                        debugging('[CourseAgent] JSON parse FAILED (attempt ' . $attemptindex . '). Error: ' . json_last_error_msg() . ' | Preview: ' . $debugpreview);
-                        throw new \Exception(
-                            'Failed to parse AI response as JSON: ' . json_last_error_msg() .
-                            "\n\n--- RAW AI RESPONSE (first 2000 chars) ---\n" . $debugpreview .
-                            "\n--- END RAW AI RESPONSE ---"
-                        );
+                        debugging('[CourseAgent] Sanitized response (attempt ' . $attemptindex . '): ' . substr($response, 0, 3000));
+
+                        $coursedata = json_decode($response);
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            $coursedata = json_decode($response, false, 512, JSON_INVALID_UTF8_IGNORE);
+                            if (json_last_error() !== JSON_ERROR_NONE) {
+                                $debugpreview = substr($response, 0, 2000);
+                                debugging('[CourseAgent] JSON parse FAILED (attempt ' . $attemptindex . '). Error: ' . json_last_error_msg() . ' | Preview: ' . $debugpreview);
+                                throw new \Exception(
+                                    'Failed to parse AI response as JSON: ' . json_last_error_msg() .
+                                    "\n\n--- RAW AI RESPONSE (first 2000 chars) ---\n" . $debugpreview .
+                                    "\n--- END RAW AI RESPONSE ---"
+                                );
+                            }
+                        }
+                        if (empty($coursedata->title) || empty($coursedata->sections)) {
+                            throw new \Exception('AI returned incomplete course structure. Missing title or sections.');
+                        }
+                        $returnedsectioncount = count($coursedata->sections);
+                        if ($returnedsectioncount != $numsections) {
+                            throw new \Exception(
+                                "AI returned {$returnedsectioncount} sections but {$numsections} were requested. " .
+                                "Rejecting and trying fallback."
+                            );
+                        }
+
+                        $coursedata->_used_provider_id   = $prov['providerid'];
+                        $coursedata->_used_provider_name = $prov['providername'];
+                        $coursedata->_used_model         = $trymodel;
+                        $coursedata->_fallback_log        = $fallbacklog;
+
+                        foreach ($coursedata->sections as $section) {
+                            if (!empty($section->name)) {
+                                $section->name = preg_replace('/^Section\s+\d+[:.]\s*/i', '', $section->name);
+                            }
+                        }
+
+                        return $coursedata;
+
+                    } catch (\Exception $e) {
+                        $lasterror   = $e->getMessage();
+                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $fallbacklog[] = [
+                            'provider' => $prov['providername'],
+                            'model'    => $trymodel ?: '(default)',
+                            'retry'    => $retry,
+                            'reason'   => $isratelimit ? 'rate_limit' : 'error',
+                            'message'  => $lasterror,
+                        ];
+                        if ($isratelimit) {
+                            $ratelimited = true;
+                            break 2; // Skip remaining models of this provider.
+                        }
+                        // JSON/other error: retry up to 3x then move to next model.
                     }
                 }
-                if (empty($coursedata->title) || empty($coursedata->sections)) {
-                    throw new \Exception('AI returned incomplete course structure. Missing title or sections.');
-                }
-                $returnedsectioncount = count($coursedata->sections);
-                if ($returnedsectioncount != $numsections) {
-                    throw new \Exception(
-                        "AI returned {$returnedsectioncount} sections but {$numsections} were requested. " .
-                        "Rejecting and trying fallback."
-                    );
-                }
-
-                // Attach which provider/model was actually used + fallback log.
-                $coursedata->_used_provider_id   = $attempt['providerid'];
-                $coursedata->_used_provider_name = $attempt['providername'];
-                $coursedata->_used_model         = $attempt['model'];
-                $coursedata->_fallback_log        = $fallbacklog;
-
-                return $coursedata;
-            } catch (\Exception $e) {
-                $lasterror = $e->getMessage();
-                $isratelimit = $this->is_rate_limit_error($lasterror);
-
-                $fallbacklog[] = [
-                    'provider' => $attempt['providername'],
-                    'model'    => $attempt['model'] ?: '(default)',
-                    'reason'   => $isratelimit ? 'rate_limit' : 'error',
-                    'message'  => $lasterror,
-                ];
-
-                // Only continue fallback chain on rate-limit errors.
-                if (!$isratelimit) {
-                    throw $e;
-                }
-                // Rate limited — try next.
             }
+            // $ratelimited=true → foreach continues to next provider automatically.
         }
 
-        // All attempts exhausted.
-        throw new \Exception('All AI providers and models hit rate limits. Last error: ' . $lasterror);
+        throw new \Exception('All AI providers exhausted after retries. Last error: ' . $lasterror);
     }
 
     /**
-     * Build an ordered list of (providerid, model) attempts for fallback.
-     * First: requested provider with requested model.
-     * Then: same provider's other models.
-     * Then: other enabled providers each with their first model.
+     * Build ordered list of providers with their models for the retry loop.
+     * Returns [{providerid, providername, models:[...]}].
+     * Order: requested/default provider first, then other enabled providers.
      *
      * @param int|null    $providerid Requested provider ID
-     * @param string|null $model      Requested model
-     * @return array Array of ['providerid', 'model', 'providername']
+     * @param string|null $model      Requested model (placed first in its provider's list)
+     * @return array
      */
-    private function build_fallback_attempts(?int $providerid, ?string $model): array {
-        $allproviders  = provider::get_all(true); // Enabled only, sorted.
-        $attempts      = [];
-        $seen          = [];
+    private function build_fallback_providers(?int $providerid, ?string $model): array {
+        $allproviders = provider::get_all(true);
+        $result       = [];
+        $seen         = [];
 
-        // Helper to add without duplication.
-        $add = function ($pid, $mod, $name) use (&$attempts, &$seen) {
-            $key = $pid . '|' . $mod;
-            if (!isset($seen[$key])) {
-                $seen[$key]  = true;
-                $attempts[]  = ['providerid' => $pid, 'model' => $mod, 'providername' => $name];
+        $addprovider = function ($p, $firstmodel) use (&$result, &$seen) {
+            if (isset($seen[$p->id])) {
+                return;
+            }
+            $seen[$p->id] = true;
+            $models = json_decode($p->models, true) ?: [];
+            if ($firstmodel && in_array($firstmodel, $models, true)) {
+                $models = array_merge([$firstmodel], array_values(array_filter($models, function ($m) use ($firstmodel) {
+                    return $m !== $firstmodel;
+                })));
+            }
+            if ($models) {
+                $result[] = ['providerid' => $p->id, 'providername' => $p->name, 'models' => $models];
             }
         };
 
-        // 1. Requested provider + requested model first.
         if ($providerid) {
-            $reqprovider = provider::get($providerid);
-            if ($reqprovider) {
-                $models = json_decode($reqprovider->models, true) ?: [];
-                $firstmodel = $model ?: ($models[0] ?? '');
-                $add($providerid, $firstmodel, $reqprovider->name);
-                // Add remaining models of same provider.
-                foreach ($models as $m) {
-                    if ($m !== $firstmodel) {
-                        $add($providerid, $m, $reqprovider->name);
-                    }
-                }
+            $req = provider::get($providerid);
+            if ($req) {
+                $addprovider($req, $model);
             }
         } else {
-            // No specific provider requested — use default first.
             $def = provider::get_default();
             if ($def) {
-                $models     = json_decode($def->models, true) ?: [];
-                $firstmodel = $model ?: ($models[0] ?? '');
-                $add($def->id, $firstmodel, $def->name);
-                foreach ($models as $m) {
-                    if ($m !== $firstmodel) {
-                        $add($def->id, $m, $def->name);
-                    }
-                }
+                $addprovider($def, $model);
             }
         }
 
-        // 2. All other enabled providers, each with their full model list.
         foreach ($allproviders as $p) {
-            $models = json_decode($p->models, true) ?: [];
-            $first  = $models[0] ?? '';
-            $add($p->id, $first, $p->name);
-            foreach ($models as $m) {
-                if ($m !== $first) {
-                    $add($p->id, $m, $p->name);
-                }
-            }
+            $addprovider($p, null);
         }
 
-        return $attempts;
+        return $result;
     }
 
     /**
@@ -368,7 +353,8 @@ class api {
         if ($includeassignment) {
             $prompt .= "== ASSIGNMENT REQUIREMENTS ==\n";
             $prompt .= "For EVERY section, include a practical assignment that reinforces the lesson content.\n";
-            $prompt .= "The assignment should have clear instructions, a descriptive title, and an estimated word count.\n\n";
+            $prompt .= "The assignment should have clear instructions, a descriptive title, and an estimated word count.\n";
+            $prompt .= "Do NOT reference any external files, datasets, CSVs, PDFs, or downloadable resources in assignment instructions. All tasks must be completable by the student using only their own knowledge and publicly available information.\n\n";
         }
 
         $prompt .= "== CRITICAL SECTION COUNT REQUIREMENT ==\n";
@@ -383,7 +369,7 @@ class api {
         $prompt .= '  "summary": "A rich 2-3 sentence course description explaining what students will learn and why it matters",' . "\n";
         $prompt .= '  "sections": [' . "\n";
         $prompt .= "    {\n";
-        $prompt .= '      "name": "Section title (clear and descriptive)",' . "\n";
+        $prompt .= '      "name": "Clear descriptive title — do NOT start with Section N: or any numbering",' . "\n";
         $prompt .= '      "description": "2-3 sentence section overview",' . "\n";
         $prompt .= "      \"lesson\": {\n";
         $prompt .= '        "summary": "1-2 sentence lesson intro shown to students before they open the lesson",' . "\n";
@@ -920,8 +906,844 @@ class api {
             'step'    => $step,
             'percent' => $percent,
             'message' => $message,
-            'time'    => time(),
+            'time'   => time(),
         ];
         file_put_contents($file, json_encode($data) . "\n", FILE_APPEND);
+    }
+
+    /**
+     * Edit a specific item in the course using AI.
+     *
+     * @param stdClass $coursedata Course data object
+     * @param string $targettype Target type: section, lesson, quiz, assignment, question
+     * @param int $targetindex Section index (0-based)
+     * @param int|null $questionindex Question index (for question target type)
+     * @param string $userprompt User's edit request
+     * @return stdClass Result with coursedata and message
+     */
+    public function edit_item($coursedata, $targettype, $targetindex, $questionindex, $userprompt) {
+        $sections = $coursedata->sections ?? [];
+        if (!isset($sections[$targetindex])) {
+            throw new \Exception('Section not found at index ' . $targetindex);
+        }
+
+        $section = $sections[$targetindex];
+        $targetitem = null;
+        $itemtype = '';
+
+        // Identify target item based on targettype.
+        switch ($targettype) {
+            case 'lesson':
+            case 'section':
+                $targetitem = $section->lesson ?? null;
+                $itemtype = 'lesson';
+                break;
+            case 'quiz':
+                $targetitem = $section->quiz ?? null;
+                $itemtype = 'quiz';
+                break;
+            case 'question':
+                if (!empty($section->quiz->questions[$questionindex])) {
+                    $targetitem = $section->quiz->questions[$questionindex];
+                    $itemtype = 'question';
+                }
+                break;
+            case 'assignment':
+                $targetitem = $section->assignment ?? null;
+                $itemtype = 'assignment';
+                break;
+            default:
+                throw new \Exception('Unknown target type: ' . $targettype);
+        }
+
+        if (!$targetitem) {
+            throw new \Exception('No ' . $itemtype . ' found in section ' . ($targetindex + 1));
+        }
+
+        // Build context for AI.
+        $prompt = $this->build_edit_prompt($itemtype, $section, $targetitem, $questionindex, $userprompt);
+
+        // System prompt for strict JSON output.
+        $systemprompt = "You are a JSON generator. Return ONLY valid JSON - no markdown code blocks, no explanations, no conversational text. " .
+            "The JSON must match the exact structure expected. Start with { and end with }.";
+
+        // Triple-nested fallback: provider → model → 3 retries. Mirrors generate_course_outline().
+        $providers   = $this->build_fallback_providers(null, null);
+        $lasterror   = null;
+        $fallbacklog = [];
+        $response    = null;
+        $usedprov    = null;
+        $usedmodel   = null;
+
+        foreach ($providers as $prov) {
+            $ratelimited = false;
+            foreach ($prov['models'] as $trymodel) {
+                for ($retry = 1; $retry <= 3; $retry++) {
+                    try {
+                        $response  = provider::call_api($prompt, $prov['providerid'], $trymodel, $systemprompt);
+                        $usedprov  = $prov['providername'];
+                        $usedmodel = $trymodel;
+                        break 3;
+                    } catch (\Throwable $e) {
+                        $lasterror   = $e->getMessage();
+                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $fallbacklog[] = [
+                            'provider' => $prov['providername'],
+                            'model'    => $trymodel ?: '(default)',
+                            'retry'    => $retry,
+                            'reason'   => $isratelimit ? 'rate_limit' : 'error',
+                            'message'  => $lasterror,
+                        ];
+                        if ($isratelimit) {
+                            $ratelimited = true;
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($response === null) {
+            throw new \Exception('All AI providers exhausted. Last error: ' . $lasterror);
+        }
+
+        // Clean response and parse.
+        $response = trim($response);
+        if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/', $response, $matches)) {
+            $response = trim($matches[1]);
+        }
+
+        // Sanitize.
+        $response = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $response);
+        ini_set('pcre.backtrack_limit', 10000000);
+        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"/s', function ($m) {
+            $inner = $m[1];
+            $inner = preg_replace('/(?<!\\\\)\r/', '\\r', $inner);
+            $inner = preg_replace('/(?<!\\\\)\n/', '\\n', $inner);
+            $inner = preg_replace('/(?<!\\\\)\t/', '\\t', $inner);
+            return '"' . $inner . '"';
+        }, $response);
+        if ($sanitized !== null) {
+            $response = $sanitized;
+        }
+
+        $updateditem = json_decode($response);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            debugging('edit_item: JSON parse error: ' . json_last_error_msg());
+            debugging('edit_item: response preview: ' . substr($response, 0, 1000));
+            throw new \Exception('Failed to parse AI response: ' . json_last_error_msg());
+        }
+
+        // Merge updated item back into course.
+        $this->merge_edited_item($coursedata, $targettype, $targetindex, $questionindex, $updateditem);
+
+        // Build descriptive message based on what was changed.
+        $itemcount = 0;
+        if ($itemtype === 'quiz') {
+            $itemcount = count($updateditem->questions ?? []);
+        } else if ($itemtype === 'question') {
+            $itemcount = 1;
+        } else if ($itemtype === 'lesson') {
+            $itemcount = !empty($updateditem->title) ? 1 : 0;
+        } else if ($itemtype === 'assignment') {
+            $itemcount = !empty($updateditem->title) ? 1 : 0;
+        }
+        $messagetext = "Updated {$itemtype} in section " . ($targetindex + 1);
+        if ($itemtype === 'quiz' && $itemcount > 0) {
+            $messagetext .= " ({$itemcount} questions)";
+        }
+
+        return (object) [
+            'coursedata'    => $coursedata,
+            'message'       => $messagetext,
+            'fallback_log'  => $fallbacklog,
+            'used_provider' => $usedprov,
+            'used_model'    => $usedmodel,
+        ];
+    }
+
+    /**
+     * Build prompt for targeted edit.
+     */
+    private function build_edit_prompt($itemtype, $section, $targetitem, $questionindex, $userprompt) {
+        $sectionname = $section->name ?? 'Section ' . ($section->index ?? 0);
+
+        if ($itemtype === 'question') {
+            $q = $targetitem;
+            $qnum = ($questionindex ?? 0) + 1;
+            $prompt = "You are an expert instructional designer.\n";
+            $prompt .= "Edit the following quiz question based on the user's request.\n\n";
+            $prompt .= "Target: Quiz Question Q{$qnum} in Section: {$sectionname}\n";
+            $prompt .= "----------------------------------------\n";
+            $prompt .= "Question: {$q->question}\n";
+            $prompt .= "Options:\n";
+            foreach ($q->options ?? [] as $oi => $opt) {
+                $prompt .= chr(65 + $oi) . ". {$opt}\n";
+            }
+            $prompt .= "Correct Answer: " . chr(65 + ($q->correct_answer ?? 0)) . "\n";
+            if (!empty($q->explanation)) {
+                $prompt .= "Explanation: {$q->explanation}\n";
+            }
+            $prompt .= "\nUser Request: {$userprompt}\n\n";
+            $prompt .= "Return ONLY the updated question as JSON with fields: question, options (array), correct_answer (0-3), explanation. ";
+            $prompt .= "Keep all other options unchanged unless specifically requested.";
+        } else if ($itemtype === 'quiz') {
+            $quiz = $targetitem;
+            $prompt = "You are an expert instructional designer.\n";
+            $prompt .= "Edit the following quiz based on the user's request.\n\n";
+            $prompt .= "Target: Quiz in Section: {$sectionname}\n";
+            $prompt .= "----------------------------------------\n";
+            $prompt .= "Quiz Title: " . ($quiz->title ?? $sectionname) . "\n\n";
+            $prompt .= "Current Questions:\n";
+            foreach ($quiz->questions ?? [] as $qi => $q) {
+                $qnum = $qi + 1;
+                $prompt .= "Q{$qnum}: {$q->question}\n";
+                foreach ($q->options ?? [] as $oi => $opt) {
+                    $prompt .= "  " . chr(65 + $oi) . ". {$opt}\n";
+                }
+                $prompt .= "  Answer: " . chr(65 + ($q->correct_answer ?? 0)) . "\n";
+                if (!empty($q->explanation)) {
+                    $prompt .= "  Explanation: {$q->explanation}\n";
+                }
+                $prompt .= "\n";
+            }
+            $prompt .= "User Request: {$userprompt}\n\n";
+            $prompt .= "IMPORTANT: Return ONLY valid JSON (no markdown, no explanation). ";
+            $prompt .= "The JSON must be an object with a 'questions' array containing all " . count($quiz->questions ?? []) . " questions. ";
+            $prompt .= "Preserve all existing questions unless the user explicitly asks to add/remove/replace specific ones. ";
+            $prompt .= "If adding questions, add them to the questions array. ";
+            $prompt .= "If removing, omit them from the array.";
+        } else if ($itemtype === 'lesson') {
+            $lesson = $targetitem;
+            $prompt = "You are an expert instructional designer.\n";
+            $prompt .= "Edit the following lesson content based on the user's request.\n\n";
+            $prompt .= "Target: Lesson in Section: {$sectionname}\n";
+            $prompt .= "----------------------------------------\n";
+            $prompt .= "Title: " . ($lesson->title ?? $sectionname) . "\n";
+            if (!empty($lesson->summary)) {
+                $prompt .= "Summary: {$lesson->summary}\n";
+            }
+            if (!empty($lesson->content_html)) {
+                $prompt .= "Content: {$lesson->content_html}\n";
+            }
+            $prompt .= "\nUser Request: {$userprompt}\n\n";
+            $prompt .= "Return ONLY the updated lesson as JSON with fields: title, summary, content_html. ";
+            $prompt .= "Keep content_html as HTML with proper <h2>, <p>, <ul>, etc. tags.";
+        } else if ($itemtype === 'assignment') {
+            $a = $targetitem;
+            $prompt = "You are an expert instructional designer.\n";
+            $prompt .= "Edit the following assignment based on the user's request.\n";
+            $prompt .= "Do NOT reference any external files, datasets, CSVs, PDFs, or downloadable resources in the assignment. All tasks must be completable by the student using only their own knowledge and publicly available information.\n\n";
+            $prompt .= "Target: Assignment in Section: {$sectionname}\n";
+            $prompt .= "----------------------------------------\n";
+            $prompt .= "Title: " . ($a->title ?? $sectionname) . "\n";
+            if (!empty($a->description)) {
+                $prompt .= "Description: {$a->description}\n";
+            }
+            if (!empty($a->instructions)) {
+                $prompt .= "Instructions:\n";
+                foreach ($a->instructions as $i => $inst) {
+                    $prompt .= ($i + 1) . ". {$inst}\n";
+                }
+            }
+            if (!empty($a->word_count)) {
+                $prompt .= "Word Count: {$a->word_count}\n";
+            }
+            $prompt .= "\nUser Request: {$userprompt}\n\n";
+            $prompt .= "Return ONLY the updated assignment as JSON with fields: title, description, instructions (array), word_count.";
+        }
+
+        $prompt .= "\n\nReturn ONLY valid JSON, no markdown fences or explanation.";
+
+        return $prompt;
+    }
+
+    /**
+     * Merge edited item back into course data.
+     */
+    private function merge_edited_item($coursedata, $targettype, $targetindex, $questionindex, $updateditem) {
+        $section = $coursedata->sections[$targetindex];
+
+        switch ($targettype) {
+            case 'question':
+                $section->quiz->questions[$questionindex] = $updateditem;
+                break;
+            case 'quiz':
+                $section->quiz = $updateditem;
+                break;
+            case 'lesson':
+            case 'section':
+                $section->lesson = $updateditem;
+                break;
+            case 'assignment':
+                $section->assignment = $updateditem;
+                break;
+        }
+    }
+
+    /**
+     * Full course AI assist — NLP-direct, conversation-aware.
+     * Single AI call determines intent + generates content. No separate intent detection.
+     *
+     * @param stdClass $coursedata Course data object
+     * @param string $userprompt User's request
+     * @return stdClass Result with coursedata, delta, message, response_type
+     */
+    public function ai_assist($coursedata, $userprompt) {
+        global $SESSION;
+
+        $history = $SESSION->courseagent_chat_history ?? [];
+
+        // Pre-load the relevant section content based on section reference in text.
+        $sectioncount    = count($coursedata->sections ?? []);
+        $mentionedsecidx = $this->detect_section_reference($userprompt, $sectioncount);
+        $userturn        = $this->build_context_prompt($coursedata, $userprompt, $mentionedsecidx);
+        $systemprompt    = $this->get_assistant_system_prompt();
+
+        // Flatten history for API call.
+        $historymessages = array_map(
+            fn($h) => ['role' => $h['role'], 'content' => $h['content']],
+            array_slice($history, -10)
+        );
+
+        // Triple-nested fallback: provider → model → 3 retries. Mirrors generate_course_outline().
+        $providers   = $this->build_fallback_providers(null, null);
+        $lasterror   = null;
+        $fallbacklog = [];
+        $rawresponse = null;
+        $usedprov    = null;
+        $usedmodel   = null;
+
+        foreach ($providers as $prov) {
+            $ratelimited = false;
+            foreach ($prov['models'] as $trymodel) {
+                for ($retry = 1; $retry <= 3; $retry++) {
+                    try {
+                        $rawresponse = provider::call_api_with_history(
+                            $historymessages,
+                            $userturn,
+                            $systemprompt,
+                            $prov['providerid'],
+                            $trymodel
+                        );
+                        $usedprov  = $prov['providername'];
+                        $usedmodel = $trymodel;
+                        break 3;
+                    } catch (\Throwable $e) {
+                        $lasterror   = $e->getMessage();
+                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $fallbacklog[] = [
+                            'provider' => $prov['providername'],
+                            'model'    => $trymodel ?: '(default)',
+                            'retry'    => $retry,
+                            'reason'   => $isratelimit ? 'rate_limit' : 'error',
+                            'message'  => $lasterror,
+                        ];
+                        if ($isratelimit) {
+                            $ratelimited = true;
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($rawresponse === null) {
+            return (object) [
+                'coursedata'    => $coursedata,
+                'delta'         => null,
+                'message'       => 'All AI providers exhausted. Last error: ' . $lasterror,
+                'response_type' => 'question',
+                'plan_summary'  => null,
+                'fallback_log'  => $fallbacklog,
+                'used_provider' => null,
+                'used_model'    => null,
+            ];
+        }
+
+        $result = $this->parse_json_response($rawresponse);
+
+        // Persist this turn to session history.
+        $history[] = ['role' => 'user',      'content' => $userprompt,         'ts' => time()];
+        $history[] = ['role' => 'assistant',  'content' => $result->message ?? '', 'ts' => time()];
+        $SESSION->courseagent_chat_history = array_slice($history, -20);
+
+        $rtype = $result->type ?? 'delta';
+
+        // Delete ops require a plan step first. If AI skipped it, demote to plan.
+        if ($rtype === 'delta' && ($result->op ?? '') === 'delete') {
+            $confirmwords = ['yes', 'confirm', 'proceed', 'go ahead', 'do it', 'sure', 'ok', 'yep', 'yeah'];
+            $usermsg = strtolower($userprompt ?? '');
+            $isconfirm = false;
+            foreach ($confirmwords as $word) {
+                if (strpos($usermsg, $word) !== false) {
+                    $isconfirm = true;
+                    break;
+                }
+            }
+            if (!$isconfirm) {
+                $rtype = 'plan';
+                if (empty($result->plan_summary)) {
+                    $target = $result->target_type ?? 'item';
+                    $sidx = (int)($result->section_index ?? 0) + 1;
+                    $result->plan_summary = 'Delete ' . $target . ' in section ' . $sidx;
+                }
+            }
+        }
+
+        // question or plan — no course changes yet.
+        // delete ops legitimately have data=null; don't block them.
+        if ($rtype !== 'delta' || ($result->op !== 'delete' && empty($result->data))) {
+            return (object) [
+                'coursedata'    => $coursedata,
+                'delta'         => null,
+                'message'       => $result->message ?? '',
+                'response_type' => $rtype,
+                'plan_summary'  => $result->plan_summary ?? null,
+                'fallback_log'  => $fallbacklog,
+                'used_provider' => $usedprov,
+                'used_model'    => $usedmodel,
+            ];
+        }
+
+        // Build intent from AI response fields (AI determined these from NLP).
+        $intent = (object) [
+            'action'         => $result->op           ?? 'update',
+            'target'         => $result->target_type  ?? 'lesson',
+            'section_index'  => (int)($result->section_index ?? 0),
+            'question_index' => isset($result->question_index) ? (int)$result->question_index : 0,
+            'insert_before'  => isset($result->insert_before) ? (int)$result->insert_before : null,
+        ];
+
+        debugging('Course Agent AI assist: intent from AI response ' . json_encode($intent), DEBUG_DEVELOPER);
+
+        // Handle delete — no AI data needed.
+        if ($intent->action === 'delete') {
+            $updated = $this->merge_delta($coursedata, $intent, null);
+        } else {
+            $updated = $this->merge_delta($coursedata, $intent, $result->data);
+        }
+
+        $updated->sections = array_values((array)$updated->sections);
+        foreach ($updated->sections as $i => $section) {
+            $section->index = $i;
+        }
+
+        $deltaobj = (object) [
+            'op'             => $intent->action,
+            'target_type'    => $intent->target,
+            'section_index'  => $intent->section_index,
+            'question_index' => $intent->target === 'question' ? $intent->question_index : null,
+            'data'           => $intent->action === 'delete' ? null : $result->data,
+        ];
+
+        return (object) [
+            'coursedata'    => $updated,
+            'delta'         => $deltaobj,
+            'message'       => $result->message ?? $this->build_success_message($intent),
+            'response_type' => 'delta',
+            'fallback_log'  => $fallbacklog,
+            'used_provider' => $usedprov,
+            'used_model'    => $usedmodel,
+        ];
+    }
+
+    /**
+     * Detect an explicit "section N" reference in user text.
+     * Returns 0-based index or null if not found.
+     *
+     * @param string $text User prompt
+     * @param int $total Total number of sections
+     * @return int|null
+     */
+    private function detect_section_reference(string $text, int $total): ?int {
+        if (preg_match('/\bsections?\s+(\d+)\b/i', $text, $m)) {
+            $idx = (int)$m[1] - 1;
+            if ($idx >= 0 && $idx < $total) {
+                return $idx;
+            }
+        }
+        // "the first/second/... section"
+        $ordinals = ['first' => 0, 'second' => 1, 'third' => 2, 'fourth' => 3,
+                     'fifth' => 4, 'sixth' => 5, 'seventh' => 6, 'eighth' => 7];
+        foreach ($ordinals as $word => $idx) {
+            if (preg_match('/\b' . $word . '\s+section\b/i', $text) && $idx < $total) {
+                return $idx;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Build the user-turn prompt: course summary + relevant section full content + user request.
+     *
+     * @param stdClass $coursedata
+     * @param string $userprompt
+     * @param int|null $targetsectionidx 0-based index of section to include in full, or null
+     * @return string
+     */
+    private function build_context_prompt($coursedata, $userprompt, ?int $targetsectionidx): string {
+        $sections = $coursedata->sections ?? [];
+        $total    = count($sections);
+
+        $prompt  = "=== COURSE: " . ($coursedata->title ?? 'Untitled') . " ===\n";
+        $prompt .= "Total sections: {$total}\n\n";
+
+        $prompt .= "=== COURSE STRUCTURE OVERVIEW ===\n";
+        foreach ($sections as $i => $s) {
+            $qcount = isset($s->quiz->questions) ? count((array)$s->quiz->questions) : 0;
+            $prompt .= "Section " . ($i + 1) . ": \"" . ($s->name ?? 'Untitled') . "\"";
+            $prompt .= " | lesson: yes";
+            $prompt .= " | quiz: " . ($qcount > 0 ? "yes ({$qcount} questions)" : "no");
+            $prompt .= " | assignment: " . (isset($s->assignment) ? "yes" : "no") . "\n";
+        }
+        $prompt .= "\n";
+
+        // Include full content of mentioned section(s) or all sections if ≤4.
+        if ($targetsectionidx !== null) {
+            $prompt .= $this->format_section_full($sections[$targetsectionidx], $targetsectionidx);
+        } else if ($total <= 4) {
+            foreach ($sections as $i => $s) {
+                $prompt .= $this->format_section_full($s, $i);
+            }
+        }
+
+        $prompt .= "=== USER REQUEST ===\n";
+        $prompt .= $userprompt . "\n";
+
+        return $prompt;
+    }
+
+    /**
+     * Format a single section's full content for the AI prompt.
+     */
+    private function format_section_full($section, int $idx): string {
+        $num = $idx + 1;
+        $out = "=== FULL CONTENT: SECTION {$num} — \"" . ($section->name ?? 'Untitled') . "\" ===\n";
+
+        if (!empty($section->lesson)) {
+            $out .= "LESSON:\n";
+            $out .= "  title: " . ($section->lesson->title ?? '') . "\n";
+            $out .= "  summary: " . ($section->lesson->summary ?? '') . "\n";
+            $out .= "  content_html: " . ($section->lesson->content_html ?? '') . "\n\n";
+        }
+
+        if (isset($section->quiz->questions) && !empty($section->quiz->questions)) {
+            $questions = array_values((array)$section->quiz->questions);
+            $out .= "QUIZ (" . count($questions) . " questions):\n";
+            foreach ($questions as $qi => $q) {
+                $out .= "  Q" . ($qi + 1) . ": " . ($q->question ?? '') . "\n";
+                $options = isset($q->options) ? array_values((array)$q->options) : [];
+                $correctidx = isset($q->correct_answer) ? (int)$q->correct_answer : -1;
+                foreach ($options as $oi => $opt) {
+                    $correct = ($oi === $correctidx) ? ' [CORRECT]' : '';
+                    $out .= "    " . chr(65 + $oi) . ". {$opt}{$correct}\n";
+                }
+                if (!empty($q->explanation)) {
+                    $out .= "    Explanation: " . $q->explanation . "\n";
+                }
+            }
+            $out .= "\n";
+        }
+
+        if (!empty($section->assignment)) {
+            $a = $section->assignment;
+            $out .= "ASSIGNMENT:\n";
+            $out .= "  title: " . ($a->title ?? '') . "\n";
+            $out .= "  description: " . ($a->description ?? '') . "\n";
+            if (!empty($a->instructions)) {
+                $out .= "  instructions: " . implode(" | ", (array)$a->instructions) . "\n";
+            }
+            if (!empty($a->word_count)) {
+                $out .= "  word_count: " . $a->word_count . "\n";
+            }
+            $out .= "\n";
+        }
+
+        return $out;
+    }
+
+    /**
+     * Static system prompt for the conversational assistant.
+     * Tells AI the response schema + exact JSON schemas per target type.
+     */
+    private function get_assistant_system_prompt(): string {
+        return <<<'SYSTEMPROMPT'
+You are an AI assistant for editing Moodle LMS courses. You receive a course structure, optional full section content, conversation history, and the user's request.
+
+ALWAYS respond with ONLY a valid JSON object — no markdown fences, no extra text:
+{
+  "type": "question|plan|delta",
+  "message": "What you say to the user (friendly, concise)",
+  "plan_summary": null,
+  "target_type": "lesson|quiz|question|assignment|section",
+  "section_index": 0,
+  "question_index": null,
+  "insert_before": null,
+  "op": "add|update|delete|replace",
+  "data": null
+}
+
+RULES:
+- type=question: Request is ambiguous or missing required info. Ask ONE focused question. Set data=null.
+- type=plan: You have ALL information needed to act, but change is large/risky (rewrite full lesson, delete a section). State exactly what you will do in message. Set plan_summary to one sentence summary. Set data=null. NEVER ask the user questions inside a plan message — if you need more info first, use type=question instead.
+- type=delta: Change is clear and specific, OR user said "yes"/"confirm"/"proceed" after a plan. Include data.
+- section_index is ALWAYS 0-based (section 1 = index 0, section 2 = index 1, etc.).
+- Parse section references from user text ("section 2", "the second section") — override any assumed default.
+- question_index is 0-based. Only set for target_type=question.
+- op values: add | update | delete | replace
+- insert_before: for op=add, target=section ONLY — 0-based index to insert the new section BEFORE that position. null means append at end. Example: "add before section 2" → insert_before=1.
+
+EXACT DATA SCHEMAS — data field must match these exactly:
+
+target_type=lesson:
+{"title":"","summary":"","content_html":"<h2>...</h2><p>...</p>"}
+
+target_type=quiz (return ALL questions, existing + new):
+{"name":"Section Quiz","questions":[{"question":"?","options":["A","B","C","D"],"correct_answer":0,"explanation":"","points":1}]}
+
+target_type=question (single question only):
+{"question":"?","options":["A","B","C","D"],"correct_answer":0,"explanation":"","points":1}
+
+target_type=assignment:
+{"title":"","description":"","instructions":["step 1","step 2"],"word_count":500}
+
+target_type=section (complete new section):
+{"name":"","description":"","lesson":{"title":"","summary":"","content_html":""},"quiz":{"name":"Quiz","questions":[...]},"assignment":{"title":"","description":"","instructions":[],"word_count":500}}
+
+IMPORTANT: For "add N more questions" requests: set target_type=quiz, op=update, and include ALL existing questions PLUS the N new ones in data.questions. Never lose existing questions.
+IMPORTANT: For op=delete, always set data=null — never include section/activity content in data.
+IMPORTANT: Never combine asking questions with type=plan. If you lack any required detail (title, description, word count, etc.), always use type=question to gather it first, then use type=plan or type=delta once you have what you need.
+MANDATORY DELETE RULE: For ANY delete operation, ALWAYS use type=plan first — even if the request is perfectly clear. In message, describe exactly what will be removed and ask the user to confirm. Only use type=delta with op=delete when the user's CURRENT message is an explicit confirmation ("yes", "proceed", "confirm", "go ahead", "do it") of a delete you described in your immediately previous response.
+IMPORTANT: For assignment content — NEVER reference external files, datasets, CSVs, PDFs, or downloadable resources that students would need. All assignment tasks must be completable using only the student's own knowledge and publicly available information.
+SYSTEMPROMPT;
+    }
+
+    /**
+     * Extract the first balanced JSON object from a string using brace counting.
+     * Avoids regex confusion caused by inner markdown fences inside content_html.
+     */
+    private function extract_json_object(string $text): string {
+        $start = strpos($text, '{');
+        if ($start === false) {
+            return $text;
+        }
+        $depth = 0;
+        $instr = false;
+        $esc   = false;
+        $len   = strlen($text);
+        for ($i = $start; $i < $len; $i++) {
+            $c = $text[$i];
+            if ($esc) {
+                $esc = false;
+                continue;
+            }
+            if ($c === '\\' && $instr) {
+                $esc = true;
+                continue;
+            }
+            if ($c === '"') {
+                $instr = !$instr;
+                continue;
+            }
+            if (!$instr) {
+                if ($c === '{') {
+                    $depth++;
+                } else if ($c === '}' && --$depth === 0) {
+                    return substr($text, $start, $i - $start + 1);
+                }
+            }
+        }
+        return $text;
+    }
+
+    /**
+     * Escape bare control characters inside JSON string values.
+     * Character-by-character walk — immune to PCRE backtrack limits.
+     */
+    private function sanitize_json_strings(string $json): string {
+        $out   = '';
+        $len   = strlen($json);
+        $instr = false;
+        $esc   = false;
+        for ($i = 0; $i < $len; $i++) {
+            $c   = $json[$i];
+            $ord = ord($c);
+            if ($esc) {
+                $out .= $c;
+                $esc  = false;
+                continue;
+            }
+            if ($c === '\\' && $instr) {
+                $out .= $c;
+                $esc  = true;
+                continue;
+            }
+            if ($c === '"') {
+                $instr = !$instr;
+                $out  .= $c;
+                continue;
+            }
+            if ($instr) {
+                if ($c === "\n")  { $out .= '\\n';  continue; }
+                if ($c === "\r")  { $out .= '\\r';  continue; }
+                if ($c === "\t")  { $out .= '\\t';  continue; }
+                if ($ord < 0x20)  { $out .= sprintf('\\u%04x', $ord); continue; }
+            } else {
+                if ($ord < 0x20 && $c !== "\n" && $c !== "\r" && $c !== "\t") {
+                    continue;
+                }
+            }
+            $out .= $c;
+        }
+        return $out;
+    }
+
+    /**
+     * Parse and sanitize AI JSON response.
+     */
+    private function parse_json_response(string $rawresponse): \stdClass {
+        $response = trim($rawresponse);
+
+        // Strip anchored markdown fence only.
+        // The non-anchored fallback was removed: its non-greedy \{[\s\S]*?\} stops at the
+        // first } in nested JSON (e.g. inside a section's lesson object), producing a
+        // truncated/malformed string. extract_json_object() handles all fence formats safely.
+        if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/s', $response, $matches)) {
+            $response = trim($matches[1]);
+        }
+
+        // Extract first balanced JSON object (brace-counting, handles nested fences in content_html).
+        $response = $this->extract_json_object($response);
+
+        // Fast path — works for clean JSON (JSON mode, no unescaped chars).
+        $result = json_decode($response);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $result;
+        }
+
+        // Sanitize literal newlines/tabs/control-chars inside JSON string values.
+        // Character-by-character — immune to PCRE backtrack limits on large responses.
+        $sanitized = $this->sanitize_json_strings($response);
+        $result    = json_decode($sanitized);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $result;
+        }
+
+        // Last resort: ignore invalid UTF-8 sequences.
+        $result = json_decode($sanitized, false, 512, JSON_INVALID_UTF8_IGNORE);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            return $result;
+        }
+
+        debugging('ai_assist: JSON parse error: ' . json_last_error_msg(), DEBUG_DEVELOPER);
+        debugging('ai_assist: raw response (first 5000): ' . substr($rawresponse, 0, 5000), DEBUG_DEVELOPER);
+        throw new \Exception('Failed to parse AI response: ' . json_last_error_msg());
+    }
+
+    /**
+     * Merge delta into course data.
+     */
+    private function merge_delta($coursedata, $intent, $resultdata) {
+        $action = $intent->action ?? 'update';
+        $target = $intent->target ?? 'lesson';
+        $sectionidx = $intent->section_index ?? 0;
+
+        // Clone to avoid mutating original.
+        $updated = clone $coursedata;
+        if (!isset($updated->sections)) {
+            $updated->sections = [];
+        }
+
+        if ($action === 'delete' && $target === 'section') {
+            // Remove entire section.
+            if (isset($updated->sections[$sectionidx])) {
+                array_splice($updated->sections, $sectionidx, 1);
+            }
+        } else if ($action === 'add' && $target === 'section') {
+            // Add new section.
+            $newsection = is_object($resultdata) ? $resultdata : (object) ['name' => 'New Section'];
+            if (!isset($newsection->lesson)) {
+                $newsection->lesson = (object) ['title' => 'Introduction', 'summary' => '', 'content_html' => ''];
+            }
+            if (!isset($newsection->quiz)) {
+                $newsection->quiz = (object) ['name' => 'Quiz', 'questions' => []];
+            }
+            if (!isset($newsection->assignment)) {
+                $newsection->assignment = null;
+            }
+            $insertbefore = $intent->insert_before ?? null;
+            if ($insertbefore !== null && $insertbefore >= 0 && $insertbefore <= count($updated->sections)) {
+                array_splice($updated->sections, $insertbefore, 0, [$newsection]);
+            } else {
+                $updated->sections[] = $newsection;
+            }
+        } else if (isset($updated->sections[$sectionidx])) {
+            // Update existing section.
+            $section = $updated->sections[$sectionidx];
+
+            if ($target === 'lesson' || $target === 'section') {
+                $section->lesson = is_object($resultdata) ? $resultdata : ($section->lesson ?? (object) []);
+            } else if ($target === 'quiz') {
+                if ($action === 'delete') {
+                    $section->quiz = (object) ['name' => 'Quiz', 'questions' => []];
+                } else {
+                    $section->quiz = is_object($resultdata) ? $resultdata : ($section->quiz ?? (object) []);
+                }
+            } else if ($target === 'question') {
+                $qidx = $intent->question_index ?? 0;
+                if ($action === 'delete') {
+                    // Remove question.
+                    if (isset($section->quiz->questions[$qidx])) {
+                        array_splice($section->quiz->questions, $qidx, 1);
+                    }
+                } else {
+                    if (!isset($section->quiz)) {
+                        $section->quiz = (object) ['name' => 'Quiz', 'questions' => []];
+                    }
+                    if ($action === 'add') {
+                        // Append new question — don't overwrite existing.
+                        $section->quiz->questions[] = $resultdata;
+                    } else {
+                        $section->quiz->questions[$qidx] = $resultdata;
+                    }
+                }
+            } else if ($target === 'assignment') {
+                if ($action === 'delete') {
+                    $section->assignment = null;
+                } else {
+                    $section->assignment = is_object($resultdata) ? $resultdata : ($section->assignment ?? null);
+                }
+            }
+
+            $updated->sections[$sectionidx] = $section;
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Build success message.
+     */
+    private function build_success_message($intent) {
+        $action = $intent->action ?? 'Updated';
+        $target = $intent->target ?? 'item';
+        $sectionidx = ($intent->section_index ?? 0) + 1;
+
+        $messages = [
+            'add_section'    => "Added new section #{$sectionidx}.",
+            'add_quiz'       => "Added quiz to section {$sectionidx}.",
+            'add_question'   => "Added question to quiz in section {$sectionidx}.",
+            'add_assignment' => "Added assignment to section {$sectionidx}.",
+            'update_lesson'  => "Updated lesson in section {$sectionidx}.",
+            'update_quiz'    => "Updated quiz in section {$sectionidx}.",
+            'update_question' => "Updated question in section {$sectionidx}.",
+            'update_assignment' => "Updated assignment in section {$sectionidx}.",
+            'delete_question' => "Deleted question from section {$sectionidx}.",
+            'delete_section'  => "Deleted section {$sectionidx}.",
+        ];
+
+        $key = $action . '_' . $target;
+        return $messages[$key] ?? ucfirst($action) . ' ' . $target . ' in section ' . $sectionidx . '.';
     }
 }

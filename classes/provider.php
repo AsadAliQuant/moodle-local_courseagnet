@@ -305,7 +305,9 @@ class provider {
             $endpoint = trim($endpoint);
             // Build URL - only add slash and endpoint if endpoint is not empty.
             $url = $endpoint ? ($baseurl . '/' . $endpoint) : $baseurl;
-
+            if ($model && strpos($url, '{model}') !== false) {
+                $url = str_replace('{model}', $model, $url);
+            }
             // Determine API type from explicit format parameter passed from form.
             // Fall back to URL sniffing only as a last resort for legacy callers.
             $isgemini = ($apiformat === 'gemini');
@@ -373,12 +375,16 @@ class provider {
             if (!$isgemini && !empty($apikey)) {
                 $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
             }
-            $moodlecurl->setTimeout(30);
-            $moodlecurl->setConnectTimeout(10);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 30, 'CURLOPT_CONNECTTIMEOUT' => 10]);
 
             $response = $moodlecurl->post($testurl, json_encode($data));
             $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
             $error = $moodlecurl->error;
+
+            // TEMPORARY DEBUG: Log raw response and HTTP code (test_connection_raw)
+            error_log("Course Agent - test_connection_raw - Raw API response: " . $response);
+            error_log("Course Agent - test_connection_raw - HTTP code: " . $httpcode);
+            error_log("Course Agent - test_connection_raw - cURL error: " . ($error ?: 'none'));
 
             $result->httpcode = $httpcode;
             $result->response = json_decode($response);
@@ -486,7 +492,7 @@ class provider {
                     $result->message .= ' - ' . $result->response->error->message;
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $result->message = 'Exception: ' . $e->getMessage();
             $result->debug->exception = $e->getMessage();
         }
@@ -526,18 +532,21 @@ class provider {
         try {
             // Build test URL - only add slash and endpoint if endpoint is not empty.
             $url = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
+            $requestmodel = !empty($config->models_array) ? $config->models_array[0] : '';
+            if ($requestmodel && strpos($url, '{model}') !== false) {
+                $url = str_replace('{model}', $requestmodel, $url);
+            }
             $apikey = $config->apikey_decrypted;
 
-            // Use the explicit api_format field stored with the provider.
+            // Determine API type from stored provider format
             $isgemini = ($config->api_format === 'gemini');
             $apitype = $isgemini ? 'Gemini' : 'OpenAI-compatible';
 
-            // Build headers array.
+            // Build headers array
             $headers = ['Content-Type: application/json'];
             if ($isgemini) {
                 $testurl = $url . '?key=' . $apikey;
                 $testprompt = 'Say "Connection successful" in exactly those words.';
-                $requestmodel = null;
                 $data = [
                     'contents' => [
                         ['parts' => [['text' => $testprompt]]],
@@ -547,7 +556,6 @@ class provider {
                     ],
                 ];
             } else {
-                $requestmodel = !empty($config->models_array) ? $config->models_array[0] : '';
                 $testurl = $url;
                 $testprompt = 'Say "Connection successful" in exactly those words.';
                 $data = [
@@ -593,12 +601,8 @@ class provider {
 
             // Execute request using Moodle's curl class (handles SSL, proxy, $CFG->cacert automatically).
             $moodlecurl = new \curl();
-            $moodlecurl->setHeader(['Content-Type: application/json']);
-            if (!$isgemini && !empty($apikey)) {
-                $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
-            }
-            $moodlecurl->setTimeout(30);
-            $moodlecurl->setConnectTimeout(10);
+            $moodlecurl->setHeader($headers);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 30, 'CURLOPT_CONNECTTIMEOUT' => 10]);
 
             $response = $moodlecurl->post($testurl, json_encode($data));
             $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
@@ -710,7 +714,7 @@ class provider {
                     $result->message .= ' - ' . $result->response->error->message;
                 }
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $result->message = 'Exception: ' . $e->getMessage();
             $result->debug->exception = $e->getMessage();
         }
@@ -727,11 +731,17 @@ class provider {
      * @return string AI response text
      * @throws \Exception On API error
      */
-    public static function call_api(string $prompt, ?int $providerid = null, ?string $model = null): string {
+    public static function call_api(string $prompt, ?int $providerid = null, ?string $model = null, ?string $systemprompt = null): string {
+        // 240s PHP window > 180s cURL timeout so cURL always fails cleanly first.
+        set_time_limit(240);
+
         $config = self::get_config($providerid);
         $apikey = $config->apikey_decrypted;
         // Build URL - only add slash and endpoint if endpoint is not empty.
         $url = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
+        if ($model && strpos($url, '{model}') !== false) {
+            $url = str_replace('{model}', $model, $url);
+        }
 
         // Determine model.
         $model = $model ?? (!empty($config->models_array) ? $config->models_array[0] : '');
@@ -742,38 +752,46 @@ class provider {
         if ($isgemini) {
             // Gemini API format.
             $url .= '?key=' . $apikey;
+            $contents = [];
+            // Add system instruction if provided (Gemini 1.5+ supports systemInstruction).
+            if ($systemprompt) {
+                $contents[] = ['role' => 'user', 'parts' => [['text' => $systemprompt]]];
+            }
+            $contents[] = ['role' => 'model', 'parts' => [['text' => 'Understood.']]];
+            $contents[] = ['role' => 'user', 'parts' => [['text' => $prompt]]];
             $data = [
-                'contents' => [
-                    ['parts' => [['text' => $prompt]]],
-                ],
+                'contents' => $contents,
                 'generationConfig' => [
-                    'maxOutputTokens' => 8192,
+                    'maxOutputTokens'  => 32768,
+                    'responseMimeType' => 'application/json',
                 ],
             ];
 
             $moodlecurl = new \curl();
             $moodlecurl->setHeader(['Content-Type: application/json']);
-            $moodlecurl->setTimeout(120);
-            $moodlecurl->setConnectTimeout(15);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 180, 'CURLOPT_CONNECTTIMEOUT' => 15]);
 
             $response = $moodlecurl->post($url, json_encode($data));
             $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
             $error = $moodlecurl->error;
         } else {
             // OpenAI-compatible format.
+            $messages = [];
+            if ($systemprompt) {
+                $messages[] = ['role' => 'system', 'content' => $systemprompt];
+            }
+            $messages[] = ['role' => 'user', 'content' => $prompt];
             $data = [
-                'model' => $model,
-                'messages' => [
-                    ['role' => 'user', 'content' => $prompt],
-                ],
-                'stream' => false,
+                'model'           => $model,
+                'messages'        => $messages,
+                'stream'          => false,
+                'response_format' => ['type' => 'json_object'],
             ];
 
             $moodlecurl = new \curl();
             $moodlecurl->setHeader(['Content-Type: application/json']);
             $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
-            $moodlecurl->setTimeout(120);
-            $moodlecurl->setConnectTimeout(15);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 180, 'CURLOPT_CONNECTTIMEOUT' => 15]);
 
             $response = $moodlecurl->post($url, json_encode($data));
             $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
@@ -787,6 +805,107 @@ class provider {
         if ($httpcode < 200 || $httpcode >= 300) {
             $errdata = json_decode($response);
             $errmsg = $errdata->error->message ?? $response;
+            throw new \Exception('API error (HTTP ' . $httpcode . '): ' . $errmsg);
+        }
+
+        $result = json_decode($response);
+
+        if ($isgemini) {
+            if (empty($result->candidates[0]->content->parts[0]->text)) {
+                throw new \Exception('Invalid Gemini API response format');
+            }
+            return $result->candidates[0]->content->parts[0]->text;
+        } else {
+            if (empty($result->choices[0]->message->content)) {
+                throw new \Exception('Invalid OpenAI API response format');
+            }
+            return $result->choices[0]->message->content;
+        }
+    }
+
+    /**
+     * Call AI API with conversation history + new user turn.
+     * Used by the conversational assistant — passes full message history so AI has context.
+     *
+     * @param array  $history     Array of {role: 'user'|'assistant', content: string}
+     * @param string $userturn    The new user message to append
+     * @param string $systemprompt Static system instructions
+     * @return string AI response text
+     * @throws \Exception On API error
+     */
+    public static function call_api_with_history(array $history, string $userturn, string $systemprompt = '', ?int $providerid = null, ?string $model = null): string {
+        // 240s PHP window > 180s cURL timeout so cURL always fails cleanly first.
+        set_time_limit(240);
+
+        $config = self::get_config($providerid);
+        $apikey = $config->apikey_decrypted;
+        $model  = $model ?? (!empty($config->models_array) ? $config->models_array[0] : '');
+        $url    = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
+        if ($model && strpos($url, '{model}') !== false) {
+            $url = str_replace('{model}', $model, $url);
+        }
+
+        $isgemini = ($config->api_format === 'gemini');
+
+        if ($isgemini) {
+            $url .= '?key=' . $apikey;
+            $contents = [];
+            if ($systemprompt) {
+                $contents[] = ['role' => 'user',  'parts' => [['text' => $systemprompt]]];
+                $contents[] = ['role' => 'model', 'parts' => [['text' => 'Understood.']]];
+            }
+            foreach ($history as $h) {
+                $role = ($h['role'] === 'assistant') ? 'model' : 'user';
+                $contents[] = ['role' => $role, 'parts' => [['text' => $h['content']]]];
+            }
+            $contents[] = ['role' => 'user', 'parts' => [['text' => $userturn]]];
+
+            $data = [
+                'contents'         => $contents,
+                'generationConfig' => [
+                    'maxOutputTokens'  => 32768,
+                    'responseMimeType' => 'application/json',
+                ],
+            ];
+
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader(['Content-Type: application/json']);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 180, 'CURLOPT_CONNECTTIMEOUT' => 15]);
+            $response = $moodlecurl->post($url, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error    = $moodlecurl->error;
+        } else {
+            $messages = [];
+            if ($systemprompt) {
+                $messages[] = ['role' => 'system', 'content' => $systemprompt];
+            }
+            foreach ($history as $h) {
+                $messages[] = ['role' => $h['role'], 'content' => $h['content']];
+            }
+            $messages[] = ['role' => 'user', 'content' => $userturn];
+
+            $data = [
+                'model'           => $model,
+                'messages'        => $messages,
+                'stream'          => false,
+                'response_format' => ['type' => 'json_object'],
+            ];
+
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader(['Content-Type: application/json']);
+            $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
+            $moodlecurl->setopt(['CURLOPT_TIMEOUT' => 180, 'CURLOPT_CONNECTTIMEOUT' => 15]);
+            $response = $moodlecurl->post($url, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error    = $moodlecurl->error;
+        }
+
+        if ($error) {
+            throw new \Exception('API request failed: ' . $error);
+        }
+        if ($httpcode < 200 || $httpcode >= 300) {
+            $errdata = json_decode($response);
+            $errmsg  = $errdata->error->message ?? $response;
             throw new \Exception('API error (HTTP ' . $httpcode . '): ' . $errmsg);
         }
 

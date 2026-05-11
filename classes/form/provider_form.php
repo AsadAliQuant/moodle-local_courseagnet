@@ -28,6 +28,9 @@ require_once($CFG->libdir . '/formslib.php');
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class provider_form extends \moodleform {
+    /**
+     * Define the form fields for provider add/edit.
+     */
     public function definition() {
         global $CFG;
 
@@ -61,13 +64,13 @@ class provider_form extends \moodleform {
         }
 
         // Base URL.
-        $mform->addElement('text', 'baseurl', get_string('provider_baseurl', 'local_courseagent'), ['placeholder' => 'https://api.openai.com/v1']);
+        $mform->addElement('text', 'baseurl', get_string('provider_baseurl', 'local_courseagent'), ['placeholder' => get_string('baseurl_placeholder', 'local_courseagent')]);
         $mform->setType('baseurl', PARAM_RAW_TRIMMED);
         $mform->addRule('baseurl', get_string('required'), 'required', null, 'client');
         $mform->addHelpButton('baseurl', 'provider_baseurl', 'local_courseagent');
 
         // Endpoint.
-        $mform->addElement('text', 'endpoint', get_string('provider_endpoint', 'local_courseagent'), ['placeholder' => 'chat/completions']);
+        $mform->addElement('text', 'endpoint', get_string('provider_endpoint', 'local_courseagent'), ['placeholder' => get_string('endpoint_placeholder', 'local_courseagent')]);
         $mform->setType('endpoint', PARAM_RAW_TRIMMED);
         $mform->addHelpButton('endpoint', 'provider_endpoint', 'local_courseagent');
 
@@ -145,6 +148,15 @@ class provider_form extends \moodleform {
         $placeholder = get_string('provider_model_placeholder', 'local_courseagent');
         $addlabel = get_string('provider_model_add', 'local_courseagent');
         $removelabel = get_string('provider_model_remove', 'local_courseagent');
+        $nomodelsmsg = get_string('no_models_yet', 'local_courseagent');
+        $defaultmodel = get_string('default_model', 'local_courseagent');
+        $modellabel = get_string('model_label', 'local_courseagent');
+        $editlabel = get_string('edit_title', 'local_courseagent');
+        $moveuplabel = get_string('move_up', 'local_courseagent');
+        $movedownlabel = get_string('move_down', 'local_courseagent');
+        $savelabel = get_string('save', 'local_courseagent');
+        $emptymodelerr = get_string('provider_model_empty_error', 'local_courseagent');
+        $dupmodelerr = get_string('provider_model_duplicate_error', 'local_courseagent');
 
         return <<<HTML
 <div id="courseagent-models-widget" class="courseagent-models-widget" data-existing="{$existingjson}">
@@ -170,7 +182,7 @@ class provider_form extends \moodleform {
     <ul id="ca-model-list" class="list-group" style="max-width:520px;"></ul>
 
     <p id="ca-model-empty" class="text-muted small mt-2" style="display:none;">
-        <i class="fa fa-exclamation-circle mr-1"></i>No models added yet. Add at least one model.
+        <i class="fa fa-exclamation-circle mr-1"></i>{$nomodelsmsg}
     </p>
 </div>
 
@@ -220,7 +232,7 @@ class provider_form extends \moodleform {
             // Order badge.
             var badge = document.createElement('span');
             badge.className = 'badge badge-primary badge-pill mr-2';
-            badge.title = idx === 0 ? 'Default model' : 'Model ' + (idx + 1);
+            badge.title = idx === 0 ? '{$defaultmodel}' : '{$modellabel}'.replace('{\$a}', (idx + 1));
             badge.textContent = idx === 0 ? '★' : (idx + 1);
 
             // Editable model name.
@@ -238,7 +250,7 @@ class provider_form extends \moodleform {
             var editBtn = document.createElement('button');
             editBtn.type = 'button';
             editBtn.className = 'btn btn-sm btn-outline-secondary mr-1';
-            editBtn.title = 'Edit';
+            editBtn.title = '{$editlabel}';
             editBtn.innerHTML = '<i class="fa fa-pencil"></i>';
             editBtn.addEventListener('click', function() { startEdit(li, nameEl, idx); });
 
@@ -246,7 +258,7 @@ class provider_form extends \moodleform {
             var upBtn = document.createElement('button');
             upBtn.type = 'button';
             upBtn.className = 'btn btn-sm btn-outline-secondary mr-1';
-            upBtn.title = 'Move up';
+            upBtn.title = '{$moveuplabel}';
             upBtn.innerHTML = '<i class="fa fa-arrow-up"></i>';
             upBtn.disabled = (idx === 0);
             upBtn.addEventListener('click', function() {
@@ -260,7 +272,7 @@ class provider_form extends \moodleform {
             var downBtn = document.createElement('button');
             downBtn.type = 'button';
             downBtn.className = 'btn btn-sm btn-outline-secondary mr-1';
-            downBtn.title = 'Move down';
+            downBtn.title = '{$movedownlabel}';
             downBtn.innerHTML = '<i class="fa fa-arrow-down"></i>';
             downBtn.disabled = (idx === models.length - 1);
             downBtn.addEventListener('click', function() {
@@ -305,7 +317,7 @@ class provider_form extends \moodleform {
         var saveBtn = document.createElement('button');
         saveBtn.type = 'button';
         saveBtn.className = 'btn btn-sm btn-primary mr-1';
-        saveBtn.innerHTML = '<i class="fa fa-check"></i> Save';
+        saveBtn.innerHTML = '<i class="fa fa-check"></i> {$savelabel}';
         saveBtn.addEventListener('click', function() {
             var val = editInput.value.trim();
             if (!val) { editInput.classList.add('is-invalid'); return; }
@@ -339,8 +351,8 @@ class provider_form extends \moodleform {
     addBtn.addEventListener('click', function() {
         clearError();
         var val = input.value.trim();
-        if (!val) { showError('Please enter a model ID before adding.'); input.focus(); return; }
-        if (models.indexOf(val) !== -1) { showError('This model ID has already been added.'); input.focus(); return; }
+        if (!val) { showError('{$emptymodelerr}'); input.focus(); return; }
+        if (models.indexOf(val) !== -1) { showError('{$dupmodelerr}'); input.focus(); return; }
         models.push(val);
         input.value = '';
         renderList(); sync();
@@ -354,6 +366,15 @@ class provider_form extends \moodleform {
     // Initial render.
     renderList();
     sync();
+
+    // Expose setter so external preset buttons can populate the list.
+    window.caModelsWidget = {
+        setModels: function(arr) {
+            models = arr.slice();
+            renderList();
+            sync();
+        }
+    };
 })();
 </script>
 HTML;
@@ -378,6 +399,13 @@ HTML;
         $showresponselabel = get_string('provider_test_show_response', 'local_courseagent');
         $hideresponselabel = get_string('provider_test_hide_response', 'local_courseagent');
         $responsebodylabel = get_string('provider_test_response_body', 'local_courseagent');
+        $connectionsuccess = get_string('connection_successful', 'local_courseagent');
+        $connectionfailed = get_string('connection_failed', 'local_courseagent');
+        $checkconsole = get_string('check_console_debug', 'local_courseagent');
+        $requesterror = get_string('request_error', 'local_courseagent');
+        global $OUTPUT;
+        $iconvalidhtml   = $OUTPUT->pix_icon('i/valid',   '', 'moodle', ['class' => 'mr-1']);
+        $iconinvalidhtml = $OUTPUT->pix_icon('i/invalid', '', 'moodle', ['class' => 'mr-1']);
 
         // Inject JavaScript using Moodle's js_init_code() for plain JS execution.
         // NOTE: js_init_code() executes after DOM is ready, so no DOMContentLoaded needed.
@@ -499,12 +527,34 @@ btn.addEventListener('click', function(e) {
         console.log('[Course Agent] HTTP Status:', r.status);
         console.log('[Course Agent] OK:', r.ok);
         console.log('[Course Agent] Status Text:', r.statusText);
-        return r.json();
+        console.log('[Course Agent] Content-Type:', r.headers.get('content-type'));
+        return r.text();
     })
-    .then(function(data) {
+    .then(function(rawText) {
+        console.log('[Course Agent] --- RAW RESPONSE BODY ---');
+        console.log('[Course Agent] Length:', rawText.length);
+        console.log('[Course Agent] First 500 chars:');
+        console.log(rawText.substring(0, 500));
+        if (rawText.length > 500) {
+            console.log('[Course Agent] Last 500 chars:');
+            console.log(rawText.substring(rawText.length - 500));
+        }
+        var data;
+        try {
+            data = JSON.parse(rawText);
+        } catch (parseErr) {
+            console.error('[Course Agent] JSON.parse FAILED:', parseErr.message);
+            btn.disabled = false;
+            status.textContent = '';
+            result.className = 'mt-2 alert alert-danger';
+            result.innerHTML = '<strong>Parse error:</strong> Server response is not valid JSON. See console.';
+            result.style.display = 'block';
+            throw parseErr;
+        }
         console.log('[Course Agent] ========================================');
         console.log('[Course Agent] --- PARSED JSON RESPONSE ---');
         console.log('[Course Agent] ========================================');
+        console.log('[Course Agent] Object keys:', Object.keys(data));
         console.log('[Course Agent] Success:', data.success);
         console.log('[Course Agent] Message:', data.message);
         console.log('[Course Agent] HTTP Code:', data.httpcode);
@@ -555,7 +605,7 @@ btn.addEventListener('click', function(e) {
         if (data.success) {
             console.log('[Course Agent] ✓ SUCCESS: Connection test passed!');
             result.className = 'mt-2 alert alert-success';
-            result.innerHTML = '<strong>✓ {$testlabel}:</strong> ' +
+            result.innerHTML = '<strong>{$iconvalidhtml}{$testlabel}:</strong> ' +
                 (data.message || 'Connection successful!') +
                 (data.httpcode ? ' (HTTP ' + data.httpcode + ')' : '') +
                 (data.ai_response ? '<br><em>AI replied: ' + escapeHtml(data.ai_response) + '</em>' : '') +
@@ -563,7 +613,7 @@ btn.addEventListener('click', function(e) {
         } else {
             console.error('[Course Agent] ✗ FAILED: Connection test failed!');
             result.className = 'mt-2 alert alert-danger';
-            result.innerHTML = '<strong>✗ {$testlabel}:</strong> ' +
+            result.innerHTML = '<strong>{$iconinvalidhtml}{$testlabel}:</strong> ' +
                 (data.message || 'Connection failed') +
                 (data.httpcode ? ' (HTTP ' + data.httpcode + ')' : '') +
                 responseBodyHtml;

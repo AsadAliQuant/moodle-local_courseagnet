@@ -46,7 +46,7 @@ echo $OUTPUT->heading(get_string('course_history', 'local_courseagent'), 2);
 $sessions = $DB->get_records('courseagent_sessions', ['userid' => $USER->id], 'timecreated DESC');
 
 if (empty($sessions)) {
-    echo $OUTPUT->notification('You have not generated any courses yet.', 'info');
+    echo $OUTPUT->notification(get_string('no_courses_yet', 'local_courseagent'), 'info');
     echo html_writer::link(
         new moodle_url('/local/courseagent/index.php'),
         get_string('create_course', 'local_courseagent'),
@@ -57,26 +57,26 @@ if (empty($sessions)) {
     $table = new html_table();
     $table->attributes['class'] = 'table table-striped table-hover';
     $table->head = [
-        'Date Created',
-        'Course Title',
-        'Status',
-        'Actions',
+        get_string('date_created', 'local_courseagent'),
+        get_string('course_title_col', 'local_courseagent'),
+        get_string('status_col', 'local_courseagent'),
+        get_string('actions', 'local_courseagent'),
     ];
     $table->data = [];
 
     foreach ($sessions as $session) {
         $coursedata = json_decode($session->course_json);
-        $title = !empty($coursedata->title) ? $coursedata->title : 'Untitled Course';
+        $title = !empty($coursedata->title) ? $coursedata->title : get_string('untitled_course', 'local_courseagent');
         $date = userdate($session->timecreated);
         $status = ucfirst($session->status);
 
         // Status badge styling.
-        $status_class = $session->status === 'published' ? 'success' :
+        $statusclass = $session->status === 'published' ? 'success' :
                        ($session->status === 'failed' ? 'danger' : 'secondary');
-        $status_badge = html_writer::tag(
+        $statusbadge = html_writer::tag(
             'span',
             $status,
-            ['class' => "badge badge-{$status_class}"]
+            ['class' => "badge badge-{$statusclass}"]
         );
 
         // Action links.
@@ -84,12 +84,12 @@ if (empty($sessions)) {
         if ($session->courseid) {
             $actions .= html_writer::link(
                 new moodle_url('/course/view.php', ['id' => $session->courseid]),
-                'View Course',
+                get_string('view_course', 'local_courseagent'),
                 ['class' => 'btn btn-sm btn-outline-primary mr-2']
             );
         }
 
-        $table->data[] = [$date, $title, $status_badge, $actions];
+        $table->data[] = [$date, $title, $statusbadge, $actions];
     }
 
     echo html_writer::table($table);
