@@ -32,6 +32,7 @@ require_capability('local/courseagent:createcourse', $context);
 $pageurl = new moodle_url('/local/courseagent/preview.php');
 $PAGE->set_url($pageurl);
 $PAGE->set_context($context);
+navigation_node::override_active_url(new moodle_url('/local/courseagent/index.php'));
 $PAGE->set_title(get_string('preview_course', 'local_courseagent'));
 $PAGE->set_heading(get_string('preview_course', 'local_courseagent'));
 $PAGE->set_pagelayout('base');

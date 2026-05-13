@@ -25,6 +25,13 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     var chatLoading = false;
 
     const init = function() {
+        // Adjust app top offset to match whatever the fixed navbar height is (theme-agnostic).
+        var nb = document.querySelector('nav.navbar.fixed-top');
+        var app = document.getElementById('courseagent-preview-app');
+        if (nb && app) {
+            app.style.setProperty('--ca-navbar-height', nb.offsetHeight + 'px');
+        }
+
         // Read config from inline script tag (bypasses js_call_amd 1024 char limit).
         var configEl = document.getElementById('ca-config-data');
         if (configEl) {
