@@ -24,9 +24,9 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2026050901; // my/courses.php button injection - correct selectors + reactive re-render guard.
+$plugin->version   = 2026051801; // Add OpenRouter preset; quiz question population confirmed.
 $plugin->requires  = 2024100805; // Requires Moodle 5.0+ (compatible with 5.1).
 $plugin->component = 'local_courseagent'; // Full name of the plugin.
 $plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '1.2.2';
+$plugin->release   = '1.2.3';
 $plugin->supported = [500, 501]; // Supported from Moodle 5.0 to 5.1.

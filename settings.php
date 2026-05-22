@@ -92,6 +92,20 @@ if ($hassiteconfig) {
         1
     ));
 
+    // SaaS settings.
+    $settings->add(new admin_setting_heading(
+        'local_courseagent/saas_heading',
+        get_string('saas_heading', 'local_courseagent'),
+        get_string('saas_heading_desc', 'local_courseagent')
+    ));
+
+    $settings->add(new admin_setting_configpasswordunmask(
+        'local_courseagent/saas_api_key',
+        get_string('saas_api_key', 'local_courseagent'),
+        get_string('saas_api_key_desc', 'local_courseagent'),
+        ''
+    ));
+
     // Add external page for provider management.
     $ADMIN->add(
         'local_courseagent_folder',

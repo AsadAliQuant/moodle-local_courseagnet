@@ -25,6 +25,13 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     var chatLoading = false;
 
     const init = function() {
+        // Adjust app top offset to match whatever the fixed navbar height is (theme-agnostic).
+        var nb = document.querySelector('nav.navbar.fixed-top');
+        var app = document.getElementById('courseagent-preview-app');
+        if (nb && app) {
+            app.style.setProperty('--ca-navbar-height', nb.offsetHeight + 'px');
+        }
+
         // Read config from inline script tag (bypasses js_call_amd 1024 char limit).
         var configEl = document.getElementById('ca-config-data');
         if (configEl) {
@@ -131,6 +138,37 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '<i class="fa fa-tasks ca-tree-item-icon"></i>';
                     html += '<span class="ca-tree-item-label">' + strings.assignmentLabel + '</span>';
                     html += '</a>';
+                }
+
+                // H5P activity item.
+                if (config.courseData._include_h5p && section.h5p_type) {
+                    var h5pLabels = {
+                        'single_choice_set':  'H5P: Single Choice',
+                        'summary':            'H5P: Summary',
+                        'drag_the_words':     'H5P: Drag the Words',
+                        'multiple_choice':    'H5P: Multiple Choice',
+                        'true_false':         'H5P: True/False',
+                        'fill_in_blanks':     'H5P: Fill in Blanks',
+                        'quiz_question_set':  'H5P: Quiz (Question Set)',
+                        'dialog_cards':       'H5P: Dialog Cards',
+                        'essay':              'H5P: Essay',
+                        'mark_the_words':     'H5P: Mark the Words',
+                        'sort_the_paragraphs':'H5P: Sort Paragraphs',
+                        'crossword':          'H5P: Crossword',
+                        'find_the_words':     'H5P: Find the Words',
+                        'accordion':          'H5P: Accordion',
+                        'personality_quiz':   'H5P: Personality Quiz',
+                        'chart':              'H5P: Chart',
+                        'timeline':           'H5P: Timeline'
+                    };
+                    var h5pLabel = h5pLabels[section.h5p_type] || 'H5P Activity';
+                    html += '<div class="ca-tree-item ca-tree-h5p">';
+                    html += '<i class="fa fa-cubes ca-tree-item-icon"></i>';
+                    html += '<span class="badge badge-success mr-1">' + h5pLabel + '</span>';
+                    if (section.h5p_reason) {
+                        html += '<small class="text-muted">' + escapeHtml(section.h5p_reason) + '</small>';
+                    }
+                    html += '</div>';
                 }
 
                 html += '</div>';
@@ -633,6 +671,11 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                 $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> ' + strings.publishToMoodle);
                 if (response.success) {
                     Notification.addNotification({ message: strings.coursePublished, type: 'success' });
+                    if (response.h5p_warnings && response.h5p_warnings.length > 0) {
+                        response.h5p_warnings.forEach(function(warning) {
+                            Notification.addNotification({ message: warning, type: 'warning' });
+                        });
+                    }
                     setTimeout(function() { window.location.href = response.course_url; }, 1500);
                 } else {
                     Notification.addNotification({

@@ -43,6 +43,9 @@ require_once($CFG->dirroot . '/course/externallib.php');
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class api {
+    /** @var string[] Non-fatal H5P generation warnings collected during publish_course(). */
+    private $h5pwarnings = [];
+
     /**
      * Generate course outline using AI.
      *
@@ -66,7 +69,8 @@ class api {
         $uploadedcontent = null,
         $customtitle = null,
         $useemojis = false,
-        $usesvg = false
+        $usesvg = false,
+        $plan = null
     ) {
         global $USER;
 
@@ -80,7 +84,8 @@ class api {
             $uploadedcontent,
             $customtitle,
             $useemojis,
-            $usesvg
+            $usesvg,
+            $plan
         );
 
         $this->write_progress(1, 15, 'Building course outline...');
@@ -157,9 +162,16 @@ class api {
                         $coursedata->_used_model         = $trymodel;
                         $coursedata->_fallback_log        = $fallbacklog;
 
-                        foreach ($coursedata->sections as $section) {
+                        foreach ($coursedata->sections as $i => $section) {
                             if (!empty($section->name)) {
                                 $section->name = preg_replace('/^Section\s+\d+[:.]\s*/i', '', $section->name);
+                            }
+                            // Stamp plan decisions onto each section.
+                            if ($plan && isset($plan->sections[$i])) {
+                                $plansec = $plan->sections[$i];
+                                $section->quiz_planned       = $plansec->quiz       ?? null;
+                                $section->assignment_planned = $plansec->assignment ?? null;
+                                $section->h5p_type           = $plansec->h5p_type   ?? null;
                             }
                         }
 
@@ -187,6 +199,222 @@ class api {
         }
 
         throw new \Exception('All AI providers exhausted after retries. Last error: ' . $lasterror);
+    }
+
+    /**
+     * Generate a lightweight course plan — structure only, no lesson content or quiz questions.
+     * Used by paid users (saas_api_key set) before full generation. The plan contains per-section
+     * curriculum decisions: which activities make sense and which H5P type fits best.
+     *
+     * @param string      $topic            Course topic
+     * @param string      $level            Difficulty level
+     * @param int         $numsections      Number of sections
+     * @param bool        $includequiz      Quiz toggle
+     * @param bool        $includeassignment Assignment toggle
+     * @param bool        $includeh5p       H5P toggle
+     * @param int|null    $providerid       Provider ID
+     * @param string|null $model            Model name
+     * @param string|null $uploadedcontent  Extracted document text
+     * @param string|null $customtitle      Custom title override
+     * @return \stdClass Plan object {title, summary, sections[]}
+     */
+    public function plan_course_outline(
+        $topic,
+        $level,
+        $numsections,
+        $includequiz = true,
+        $includeassignment = false,
+        $includeh5p = false,
+        $providerid = null,
+        $model = null,
+        $uploadedcontent = null,
+        $customtitle = null,
+        $h5ptypes = ''
+    ) {
+        $allvalidtypes = [
+            'single_choice_set', 'summary', 'drag_the_words',
+            'multiple_choice', 'true_false', 'fill_in_blanks',
+            'quiz_question_set', 'dialog_cards', 'essay',
+            'mark_the_words', 'sort_the_paragraphs', 'crossword',
+            'find_the_words', 'accordion', 'personality_quiz', 'chart', 'timeline',
+        ];
+        $allowedtypes = $allvalidtypes;
+        if (!empty($h5ptypes)) {
+            $parsed = array_values(array_filter(
+                array_map('trim', explode(',', $h5ptypes)),
+                fn($t) => in_array($t, $allvalidtypes, true)
+            ));
+            if (!empty($parsed)) {
+                $allowedtypes = $parsed;
+            }
+        }
+
+        $prompt = $this->build_plan_prompt(
+            $topic, $level, $numsections, $includequiz, $includeassignment, $includeh5p,
+            $uploadedcontent, $customtitle, $allowedtypes
+        );
+
+        $providers  = $this->build_fallback_providers($providerid, $model);
+        $lasterror  = null;
+        $fallbacklog = [];
+
+        foreach ($providers as $prov) {
+            $ratelimited = false;
+            foreach ($prov['models'] as $trymodel) {
+                for ($retry = 1; $retry <= 3; $retry++) {
+                    try {
+                        $response = provider::call_api($prompt, $prov['providerid'], $trymodel);
+
+                        $rawresponse = trim($response);
+                        $rawresponse = preg_replace('/^```(?:json)?\s*\n?/i', '', $rawresponse);
+                        $rawresponse = preg_replace('/\n?\s*```\s*$/', '', $rawresponse);
+                        $rawresponse = trim($rawresponse);
+                        $rawresponse = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $rawresponse);
+
+                        $plandata = json_decode($rawresponse);
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            $plandata = json_decode($rawresponse, false, 512, JSON_INVALID_UTF8_IGNORE);
+                        }
+                        if (json_last_error() !== JSON_ERROR_NONE) {
+                            throw new \Exception('Failed to parse plan JSON: ' . json_last_error_msg());
+                        }
+                        if (empty($plandata->title) || empty($plandata->sections)) {
+                            throw new \Exception('Plan response missing title or sections.');
+                        }
+                        $returned = count($plandata->sections);
+                        if ($returned != $numsections) {
+                            throw new \Exception("Plan returned {$returned} sections, expected {$numsections}.");
+                        }
+
+                        foreach ($plandata->sections as $sec) {
+                            if (!empty($sec->name)) {
+                                $sec->name = preg_replace('/^Section\s+\d+[:.]\s*/i', '', $sec->name);
+                            }
+                        }
+
+                        return $plandata;
+
+                    } catch (\Exception $e) {
+                        $lasterror   = $e->getMessage();
+                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $fallbacklog[] = [
+                            'provider' => $prov['providername'],
+                            'model'    => $trymodel ?: '(default)',
+                            'retry'    => $retry,
+                            'reason'   => $isratelimit ? 'rate_limit' : 'error',
+                            'message'  => $lasterror,
+                        ];
+                        if ($isratelimit) {
+                            $ratelimited = true;
+                            break 2;
+                        }
+                    }
+                }
+            }
+        }
+
+        throw new \Exception('All AI providers exhausted during plan step. Last error: ' . $lasterror);
+    }
+
+    /**
+     * Build the lightweight planning prompt.
+     */
+    private function build_plan_prompt(
+        $topic, $level, $numsections, $includequiz, $includeassignment, $includeh5p,
+        $uploadedcontent = null, $customtitle = null, $allowedtypes = []
+    ) {
+        $topicline = !empty($topic) ? "Topic: {$topic}" : 'Topic: (derive from source document)';
+        $titleline = !empty($customtitle) ? "Custom title requested: \"{$customtitle}\"" : '';
+
+        $contextsection = '';
+        if (!empty($uploadedcontent)) {
+            $snippet = mb_substr($uploadedcontent, 0, 4000);
+            $contextsection = "\n\nSOURCE DOCUMENT (use to inform section topics):\n--- BEGIN ---\n" . $snippet . "\n--- END ---\n";
+        }
+
+        $enabledlist   = "- Lesson: always included\n";
+        $enabledlist  .= '- Quiz (MCQ): ' . ($includequiz ? 'enabled' : 'disabled') . "\n";
+        $enabledlist  .= '- Assignment: ' . ($includeassignment ? 'enabled' : 'disabled') . "\n";
+        $enabledlist  .= '- H5P Interactive Activity: ' . ($includeh5p ? 'enabled' : 'disabled') . "\n";
+
+        $h5pinstruction = '';
+        if ($includeh5p) {
+            $typedesc = [
+                'single_choice_set'   => 'set of MCQ questions testing factual recall',
+                'summary'             => 'students identify the correct statement in each group',
+                'drag_the_words'      => 'drag key terms into blanks in sentences',
+                'multiple_choice'     => 'single MCQ question with one correct answer',
+                'true_false'          => 'single true/false statement to evaluate',
+                'fill_in_blanks'      => 'type missing key words into blank spaces',
+                'quiz_question_set'   => 'full quiz with 5-8 multiple choice questions',
+                'dialog_cards'        => 'flashcard pairs with term on front, definition on back',
+                'essay'               => 'open-ended prompt with keyword hints for self-assessment',
+                'mark_the_words'      => 'click on key terms highlighted in a paragraph',
+                'sort_the_paragraphs' => 'reorder shuffled paragraphs into correct sequence',
+                'crossword'           => 'fill in answers to across/down clues',
+                'find_the_words'      => 'find hidden key terms in a word search grid',
+                'accordion'           => 'expandable sections with detailed text content',
+                'personality_quiz'    => 'questions that match learner to a learning profile',
+                'chart'               => 'bar chart comparing key quantities or categories from the material',
+                'timeline'            => 'chronological sequence of events or milestones',
+            ];
+            $typelist = !empty($allowedtypes) ? $allowedtypes : array_keys($typedesc);
+            $h5pinstruction = "\nFor H5P (when enabled), choose the BEST type for each section from:\n";
+            foreach ($typelist as $t) {
+                if (isset($typedesc[$t])) {
+                    $h5pinstruction .= "  - {$t}: {$typedesc[$t]}\n";
+                }
+            }
+            $h5pinstruction .= "Set h5p_type to null if none of the types fits well for a section.\n"
+                . "Always set h5p_reason: a one-sentence explanation of why you chose that type.\n";
+        }
+
+        $titlefield = !empty($customtitle)
+            ? '"title": "' . addslashes($customtitle) . '"'
+            : '"title": "Descriptive course title"';
+
+        $prompt  = "You are an expert curriculum designer.\n";
+        $prompt .= "Plan the structure of a Moodle course. Return JSON ONLY — no markdown, no explanation.\n\n";
+        $prompt .= "{$topicline}\n";
+        if ($titleline) {
+            $prompt .= "{$titleline}\n";
+        }
+        $prompt .= "Level: {$level}\n";
+        $prompt .= "Number of sections: EXACTLY {$numsections}\n";
+        $prompt .= $contextsection;
+        $prompt .= "\n\nACTIVITIES ENABLED BY THE TEACHER:\n" . $enabledlist;
+        $prompt .= "\nFor EACH section, decide which ENABLED activities make sense given that section's content.\n";
+        $prompt .= "A section doesn't need every enabled activity — use judgment. ";
+        $prompt .= "E.g. an intro section may not need an assignment; a vocab-heavy section suits drag-the-words.\n";
+        $prompt .= $h5pinstruction;
+        $prompt .= "\nDo NOT generate lesson content, quiz questions, or assignment instructions.\n";
+        $prompt .= "Return ONLY this JSON structure (repeat the section object exactly {$numsections} times):\n\n";
+        $prompt .= "{\n";
+        $prompt .= "  {$titlefield},\n";
+        $prompt .= '  "summary": "2-3 sentence course description",' . "\n";
+        $prompt .= '  "sections": [' . "\n";
+        $prompt .= "    {\n";
+        $prompt .= '      "name": "Section title (no numbering)",' . "\n";
+        $prompt .= '      "description": "2-3 sentence section overview",' . "\n";
+        $prompt .= '      "lesson": true,' . "\n";
+        if ($includequiz) {
+            $prompt .= '      "quiz": true,' . "  // true if quiz fits this section, false otherwise\n";
+        }
+        if ($includeassignment) {
+            $prompt .= '      "assignment": false,' . "  // true if assignment fits this section, false otherwise\n";
+        }
+        if ($includeh5p) {
+            $firsttype = !empty($typelist) ? $typelist[0] : 'single_choice_set';
+            $othertypes = !empty($typelist) ? implode(', ', array_slice($typelist, 1)) . ', null' : 'null';
+            $prompt .= '      "h5p_type": "' . $firsttype . '",' . "  // or {$othertypes}\n";
+            $prompt .= '      "h5p_reason": "One sentence explaining why this type fits"' . "\n";
+        }
+        $prompt .= "    }\n";
+        $prompt .= "  ]\n";
+        $prompt .= "}\n";
+        $prompt .= "\nIMPORTANT: sections array must contain exactly {$numsections} objects. Return valid JSON only.";
+
+        return $prompt;
     }
 
     /**
@@ -274,7 +502,8 @@ class api {
         $uploadedcontent = null,
         $customtitle = null,
         $useemojis = false,
-        $usesvg = false
+        $usesvg = false,
+        $plan = null
     ) {
         $maxsections = get_config('local_courseagent', 'max_sections') ?: 8;
         $maxquiz     = get_config('local_courseagent', 'max_quiz_questions') ?: 7;
@@ -311,6 +540,32 @@ class api {
         $prompt .= "Include Quizzes: {$quizinstruct}\n";
         $prompt .= "Include Assignments: " . ($includeassignment ? 'Yes' : 'No') . "\n";
         $prompt .= $contextsection;
+
+        // Approved course plan — AI must follow this structure exactly.
+        if (!empty($plan) && !empty($plan->sections)) {
+            $prompt .= "\n\n== APPROVED COURSE PLAN — FOLLOW THIS STRUCTURE EXACTLY ==\n";
+            $prompt .= "The teacher has approved the following plan. ";
+            $prompt .= "Use the EXACT section names and generate content for ONLY the activities listed per section.\n\n";
+            foreach ($plan->sections as $si => $plansec) {
+                $snum = $si + 1;
+                $secname = $plansec->name ?? "Section {$snum}";
+                $activities = ['Lesson (always)'];
+                if (!empty($plansec->quiz)) {
+                    $activities[] = 'Quiz (MCQ)';
+                }
+                if (!empty($plansec->assignment)) {
+                    $activities[] = 'Assignment';
+                }
+                if (!empty($plansec->h5p_type)) {
+                    $activities[] = 'H5P: ' . $plansec->h5p_type;
+                }
+                $prompt .= "  Section {$snum}: \"{$secname}\"\n";
+                $prompt .= "    Activities: " . implode(', ', $activities) . "\n";
+            }
+            $prompt .= "\nDo NOT rename, reorder, or add sections beyond this plan. ";
+            $prompt .= "Only generate quiz questions for sections where Quiz is listed. ";
+            $prompt .= "Only generate assignments for sections where Assignment is listed.\n";
+        }
 
         $prompt .= "\n\n== CRITICAL CONTENT REQUIREMENTS ==\n";
         $prompt .= "For EVERY section, you MUST write a COMPLETE, DETAILED lesson with ALL of the following:\n";
@@ -419,7 +674,7 @@ class api {
      * Publish course to Moodle.
      *
      * @param \stdClass $coursedata Course data
-     * @return int Moodle course ID
+     * @return array{courseid: int, h5p_warnings: string[]}
      */
     public function publish_course($coursedata) {
         global $DB, $USER;
@@ -484,19 +739,56 @@ class api {
                 $this->create_lesson_page($course, $sectionnum, $section);
             }
 
-            // Create quiz.
-            if (!empty($section->quiz) && !empty($section->quiz->questions)) {
+            // Create quiz — respect plan decision if present.
+            $doquiz = isset($section->quiz_planned)
+                ? (bool) $section->quiz_planned
+                : (!empty($section->quiz) && !empty($section->quiz->questions));
+            if ($doquiz && !empty($section->quiz) && !empty($section->quiz->questions)) {
                 $this->create_quiz($course, $sectionnum, $section);
             }
 
-            // Create assignment.
-            if (!empty($section->assignment)) {
+            // Create assignment — respect plan decision if present.
+            $doassignment = isset($section->assignment_planned)
+                ? (bool) $section->assignment_planned
+                : !empty($section->assignment);
+            if ($doassignment && !empty($section->assignment)) {
                 debugging('Course Agent: Creating assignment for section ' . $sectionnum .
                           ' data: ' . json_encode($section->assignment), DEBUG_DEVELOPER);
                 $this->create_assignment($course, $sectionnum, $section->assignment);
+            } else if (!$doassignment) {
+                debugging('Course Agent: Assignment skipped for section ' . $sectionnum . ' (plan decision)', DEBUG_DEVELOPER);
             } else {
                 debugging('Course Agent: No assignment data for section ' . $sectionnum .
                           ' section data: ' . json_encode($section), DEBUG_DEVELOPER);
+            }
+
+            // Create H5P activity via SaaS (optional, non-fatal).
+            if (!empty($coursedata->_include_h5p)) {
+                $saaskey = get_config('local_courseagent', 'saas_api_key') ?: '';
+                $saasurl = defined('COURSEAGENT_SAAS_URL')
+                    ? rtrim(COURSEAGENT_SAAS_URL, '/')
+                    : 'https://api.courseagent.io';
+                if (!empty($saaskey)) {
+                    $allvalidtypes = [
+                        'single_choice_set', 'summary', 'drag_the_words',
+                        'multiple_choice', 'true_false', 'fill_in_blanks',
+                        'quiz_question_set', 'dialog_cards', 'essay',
+                        'mark_the_words', 'sort_the_paragraphs', 'crossword',
+                        'find_the_words', 'accordion', 'personality_quiz', 'chart', 'timeline',
+                    ];
+                    $allowedtypes = $allvalidtypes;
+                    $rawtypes = $coursedata->_h5p_types ?? '';
+                    if (!empty($rawtypes)) {
+                        $parsed = array_values(array_filter(
+                            array_map('trim', explode(',', $rawtypes)),
+                            fn($t) => in_array($t, $allvalidtypes, true)
+                        ));
+                        if (!empty($parsed)) {
+                            $allowedtypes = $parsed;
+                        }
+                    }
+                    $this->create_h5p_activities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes);
+                }
             }
         }
 
@@ -513,7 +805,7 @@ class api {
         $session->timemodified = time();
         $DB->insert_record('courseagent_sessions', $session);
 
-        return $courseid;
+        return ['courseid' => $courseid, 'h5p_warnings' => $this->h5pwarnings];
     }
 
     /**
@@ -889,6 +1181,232 @@ class api {
             debugging('Course Agent: Failed to create assignment in section ' . $sectionnum .
                       ': ' . $e->getMessage() . '\n' . $e->getTraceAsString(), DEBUG_DEVELOPER);
         }
+    }
+
+    /**
+     * Call the CourseAgent SaaS to generate an H5P activity for a section and attach it to the course.
+     * Non-fatal: failures are collected in $this->h5pwarnings and logged; course publish is not aborted.
+     *
+     * @param \stdClass $course     Moodle course record
+     * @param int       $sectionnum 1-based section number
+     * @param \stdClass $section    Section data from AI (has ->lesson->content_html)
+     * @param string    $saaskey    SaaS API key
+     * @param string    $saasurl    SaaS base URL (no trailing slash)
+     */
+    private function create_h5p_activities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes = []) {
+        $content = strip_tags($section->lesson->content_html ?? $section->description ?? '');
+        if (empty(trim($content))) {
+            return;
+        }
+
+        // Use AI-chosen type if it's in the teacher's allowed list. Fall back to first allowed type.
+        if (empty($allowedtypes)) {
+            $allowedtypes = [
+                'single_choice_set', 'summary', 'drag_the_words',
+                'multiple_choice', 'true_false', 'fill_in_blanks',
+                'quiz_question_set', 'dialog_cards', 'essay',
+                'mark_the_words', 'sort_the_paragraphs', 'crossword',
+                'find_the_words', 'accordion', 'personality_quiz', 'chart', 'timeline',
+            ];
+        }
+        $activitytype = null;
+        if (!empty($section->h5p_type) && in_array($section->h5p_type, $allowedtypes, true)) {
+            $activitytype = $section->h5p_type;
+        } else {
+            // AI type missing or not in allowed list — rotate through allowed types.
+            $activitytype = $allowedtypes[($sectionnum - 1) % count($allowedtypes)];
+        }
+
+        $payload = [
+            'activity_type' => $activitytype,
+            'course_id'     => (string) $course->id,
+            'text'          => mb_substr($content, 0, 40000),
+        ];
+
+        $ch = curl_init($saasurl . '/api/v1/h5p/generate');
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => [
+                'X-API-Key: ' . $saaskey,
+            ],
+            CURLOPT_TIMEOUT        => 60,
+            CURLOPT_SSL_VERIFYPEER => true,
+        ]);
+        $responseraw = curl_exec($ch);
+        $httpcode    = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlerror   = curl_error($ch);
+        curl_close($ch);
+
+        // Handle SaaS-specific error codes with user-visible messages.
+        if ($curlerror || $httpcode >= 500) {
+            $msg = get_string('h5p_service_unavailable', 'local_courseagent');
+            $this->h5pwarnings[] = $msg;
+            debugging('CourseAgent H5P section ' . $sectionnum . ': service unavailable (HTTP ' . $httpcode . '): ' . $curlerror, DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode === 429) {
+            $errdata = json_decode($responseraw ?? '', true) ?? [];
+            $errcode = $errdata['error'] ?? '';
+            $msg = ($errcode === 'quota_exceeded')
+                ? get_string('h5p_quota_exceeded', 'local_courseagent')
+                : get_string('h5p_rate_limited', 'local_courseagent');
+            $this->h5pwarnings[] = $msg;
+            debugging('CourseAgent H5P section ' . $sectionnum . ': ' . $msg, DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode === 402) {
+            $this->h5pwarnings[] = get_string('h5p_paid_feature', 'local_courseagent');
+            debugging('CourseAgent H5P section ' . $sectionnum . ': paid plan required', DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode !== 200) {
+            $msg = get_string('h5p_service_unavailable', 'local_courseagent');
+            $this->h5pwarnings[] = $msg;
+            debugging('CourseAgent H5P section ' . $sectionnum . ': unexpected HTTP ' . $httpcode, DEBUG_DEVELOPER);
+            return;
+        }
+
+        $h5pparams = json_decode($responseraw ?? '');
+        if (json_last_error() !== JSON_ERROR_NONE || empty($h5pparams)) {
+            debugging('CourseAgent H5P section ' . $sectionnum . ': invalid JSON from SaaS', DEBUG_DEVELOPER);
+            return;
+        }
+
+        $h5ppath = $this->build_h5p_package($h5pparams, $activitytype);
+        if (!$h5ppath) {
+            return;
+        }
+
+        $this->create_h5p_module($course, $sectionnum, $section->name ?? ('Section ' . $sectionnum), $h5ppath);
+
+        // Clean up temp file.
+        @unlink($h5ppath);
+    }
+
+    /**
+     * Build a .h5p ZIP package from H5P params returned by the SaaS.
+     *
+     * @param \stdClass $h5pparams    H5P content params (goes into content/content.json)
+     * @param string    $activitytype One of: single_choice_set, summary, drag_the_words
+     * @return string|false Absolute path to the .h5p ZIP, or false on failure
+     */
+    private function build_h5p_package($h5pparams, $activitytype) {
+        $librarymap = [
+            'single_choice_set' => ['machineName' => 'H5P.SingleChoiceSet', 'majorVersion' => 1, 'minorVersion' => 11],
+            'summary'           => ['machineName' => 'H5P.Summary',          'majorVersion' => 1, 'minorVersion' => 10],
+            'drag_the_words'    => ['machineName' => 'H5P.DragText',         'majorVersion' => 1, 'minorVersion' => 8],
+            'multiple_choice'    => ['machineName' => 'H5P.MultiChoice',     'majorVersion' => 1, 'minorVersion' => 16],
+            'true_false'         => ['machineName' => 'H5P.TrueFalse',       'majorVersion' => 1, 'minorVersion' => 8],
+            'fill_in_blanks'     => ['machineName' => 'H5P.Blanks',          'majorVersion' => 1, 'minorVersion' => 14],
+            'quiz_question_set'  => ['machineName' => 'H5P.QuestionSet',     'majorVersion' => 1, 'minorVersion' => 20],
+            'dialog_cards'       => ['machineName' => 'H5P.Dialogcards',     'majorVersion' => 1, 'minorVersion' => 9],
+            'essay'              => ['machineName' => 'H5P.Essay',           'majorVersion' => 1, 'minorVersion' => 5],
+            'mark_the_words'     => ['machineName' => 'H5P.MarkTheWords',    'majorVersion' => 1, 'minorVersion' => 9],
+            'sort_the_paragraphs'=> ['machineName' => 'H5P.SortParagraphs', 'majorVersion' => 0, 'minorVersion' => 11],
+            'crossword'          => ['machineName' => 'H5P.Crossword',       'majorVersion' => 0, 'minorVersion' => 5],
+            'find_the_words'     => ['machineName' => 'H5P.FindTheWords',    'majorVersion' => 1, 'minorVersion' => 4],
+            'accordion'          => ['machineName' => 'H5P.Accordion',       'majorVersion' => 1, 'minorVersion' => 0],
+            'personality_quiz'   => ['machineName' => 'H5P.PersonalityQuiz','majorVersion' => 1, 'minorVersion' => 0],
+            'chart'              => ['machineName' => 'H5P.Chart',           'majorVersion' => 1, 'minorVersion' => 2],
+            'timeline'           => ['machineName' => 'H5P.Timeline',        'majorVersion' => 1, 'minorVersion' => 1],
+        ];
+        $lib = $librarymap[$activitytype] ?? $librarymap['single_choice_set'];
+
+        $h5pjson = [
+            'title'                 => $h5pparams->title ?? 'H5P Activity',
+            'language'              => 'und',
+            'mainLibrary'           => $lib['machineName'],
+            'embedTypes'            => ['div'],
+            'license'               => 'U',
+            'preloadedDependencies' => [
+                [
+                    'machineName'  => $lib['machineName'],
+                    'majorVersion' => $lib['majorVersion'],
+                    'minorVersion' => $lib['minorVersion'],
+                ],
+            ],
+        ];
+
+        // Backend returns {title, h5p_library, params: {...}}; content.json needs only the inner params.
+        $contentparams = isset($h5pparams->params) ? $h5pparams->params : $h5pparams;
+
+        $tmpdir = make_temp_directory('courseagent_h5p') . '/' . uniqid('h5p_', true);
+        if (!mkdir($tmpdir . '/content', 0777, true)) {
+            debugging('CourseAgent H5P: could not create temp dir', DEBUG_DEVELOPER);
+            return false;
+        }
+
+        file_put_contents($tmpdir . '/h5p.json', json_encode($h5pjson, JSON_PRETTY_PRINT));
+        file_put_contents($tmpdir . '/content/content.json', json_encode($contentparams));
+
+        $zippath = $tmpdir . '/activity.h5p';
+        $zip = new \ZipArchive();
+        if ($zip->open($zippath, \ZipArchive::CREATE) !== true) {
+            debugging('CourseAgent H5P: could not create ZIP at ' . $zippath, DEBUG_DEVELOPER);
+            return false;
+        }
+        $zip->addFile($tmpdir . '/h5p.json', 'h5p.json');
+        $zip->addFile($tmpdir . '/content/content.json', 'content/content.json');
+        $zip->close();
+
+        return $zippath;
+    }
+
+    /**
+     * Create a mod_h5pactivity course module and attach the .h5p package file.
+     *
+     * @param \stdClass $course      Moodle course record
+     * @param int       $sectionnum  1-based section number
+     * @param string    $activityname Name prefix for the module
+     * @param string    $h5ppath     Absolute path to the .h5p ZIP file
+     */
+    private function create_h5p_module($course, $sectionnum, $activityname, $h5ppath) {
+        global $DB;
+
+        if (!$DB->record_exists('modules', ['name' => 'h5pactivity'])) {
+            debugging('CourseAgent H5P: mod_h5pactivity is not installed on this Moodle', DEBUG_DEVELOPER);
+            return;
+        }
+
+        $cmid = $this->create_cm_stub($course, 'h5pactivity');
+
+        // Insert h5pactivity record directly (avoids file_manager draft dependency).
+        $record                  = new \stdClass();
+        $record->course          = $course->id;
+        $record->name            = $activityname . ' — H5P Activity';
+        $record->timecreated     = time();
+        $record->timemodified    = time();
+        $record->intro           = '';
+        $record->introformat     = FORMAT_HTML;
+        $record->grade           = 100;
+        $record->displayoptions  = 0;
+        $record->enabletracking  = 1;
+        $record->grademethod     = 1;
+        $instanceid = $DB->insert_record('h5pactivity', $record);
+
+        $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
+
+        // Store the .h5p file in Moodle's file system.
+        $context    = \context_module::instance($cmid);
+        $fs         = get_file_storage();
+        $filerecord = [
+            'contextid'    => $context->id,
+            'component'    => 'mod_h5pactivity',
+            'filearea'     => 'package',
+            'itemid'       => 0,
+            'filepath'     => '/',
+            'filename'     => 'activity.h5p',
+            'timecreated'  => time(),
+            'timemodified' => time(),
+        ];
+        $fs->create_file_from_pathname($filerecord, $h5ppath);
+
+        $this->place_cm_in_section($course, $cmid, $sectionnum);
     }
 
     /**

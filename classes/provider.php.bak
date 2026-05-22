@@ -1,0 +1,866 @@
+<?php
+// This file is part of Course Agent - AI Course Creator Plugin for Moodle
+//
+// Moodle is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Moodle is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+
+namespace local_courseagent;
+
+/**
+ * AI Provider management class.
+ * Handles CRUD operations, encryption, and API calls for AI providers.
+ *
+ * @package   local_courseagent
+ * @copyright 2026 Course Agent
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+class provider {
+    /** @var string Encryption key for API keys */
+    private static $cipher = 'aes-256-cbc';
+
+// phpcs:disable moodle.Files.LineLength.TooLong
+// phpcs:disable moodle.Commenting.InlineComment.InvalidEndChar
+    /**
+     * Get encryption key.
+     * Uses site identifier for key derivation.
+     *
+     * @return string
+     */
+    private static function get_encryption_key(): string {
+        $siteid = get_site_identifier();
+        return hash('sha256', $siteid . 'courseagent_encryption_key', true);
+    }
+
+    /**
+     * Encrypt API key for secure storage.
+     *
+     * @param string $apikey Plain text API key
+     * @return string Encrypted API key (base64 encoded)
+     */
+    public static function encrypt_apikey(string $apikey): string {
+        if (empty($apikey)) {
+            return '';
+        }
+
+        $key = self::get_encryption_key();
+        $ivlen = openssl_cipher_iv_length(self::$cipher);
+        $iv = openssl_random_pseudo_bytes($ivlen);
+        $encrypted = openssl_encrypt($apikey, self::$cipher, $key, OPENSSL_RAW_DATA, $iv);
+        $hmac = hash_hmac('sha256', $encrypted, $key, true);
+
+        return base64_encode($iv . $hmac . $encrypted);
+    }
+
+    /**
+     * Decrypt API key from storage.
+     *
+     * @param string $encryptedkey Encrypted API key (base64 encoded)
+     * @return string Decrypted API key
+     */
+    public static function decrypt_apikey(string $encryptedkey): string {
+        if (empty($encryptedkey)) {
+            return '';
+        }
+
+        $key = self::get_encryption_key();
+        $c = base64_decode($encryptedkey);
+        $ivlen = openssl_cipher_iv_length(self::$cipher);
+        $sha2len = 32; // HMAC-SHA256 length.
+
+        $iv = substr($c, 0, $ivlen);
+        $hmac = substr($c, $ivlen, $sha2len);
+        $encrypted = substr($c, $ivlen + $sha2len);
+
+        // Verify HMAC.
+        $calchmac = hash_hmac('sha256', $encrypted, $key, true);
+        if (!hash_equals($hmac, $calchmac)) {
+            throw new \Exception('API key decryption failed: HMAC verification failed');
+        }
+
+        return openssl_decrypt($encrypted, self::$cipher, $key, OPENSSL_RAW_DATA, $iv);
+    }
+
+    /**
+     * Get all providers.
+     *
+     * @param bool $enabledonly Only return enabled providers
+     * @return array Array of provider records
+     */
+    public static function get_all(bool $enabledonly = false): array {
+        global $DB;
+
+        $conditions = $enabledonly ? ['enabled' => 1] : [];
+        return $DB->get_records('courseagent_providers', $conditions, 'sortorder ASC, name ASC');
+    }
+
+    /**
+     * Get provider by ID.
+     *
+     * @param int $id Provider ID
+     * @return \stdClass|false Provider record or false
+     */
+    public static function get(int $id) {
+        global $DB;
+        return $DB->get_record('courseagent_providers', ['id' => $id]);
+    }
+
+    /**
+     * Get the default/active provider.
+     *
+     * @return \stdClass|false Provider record or false
+     */
+    public static function get_default() {
+        global $DB;
+
+        // Try to get default provider.
+        $provider = $DB->get_record('courseagent_providers', ['isdefault' => 1, 'enabled' => 1]);
+
+        // Fallback to first enabled provider.
+        if (!$provider) {
+            $provider = $DB->get_record('courseagent_providers', ['enabled' => 1], '*', IGNORE_MULTIPLE);
+        }
+
+        return $provider;
+    }
+
+    /**
+     * Get provider configuration for API calls.
+     * Returns decrypted API key and all settings.
+     *
+     * @param int|null $providerid Provider ID or null for default
+     * @return \stdClass Provider configuration
+     * @throws \Exception If provider not found
+     */
+    public static function get_config(?int $providerid = null): \stdClass {
+        $provider = $providerid ? self::get($providerid) : self::get_default();
+
+        if (!$provider) {
+            throw new \Exception('No AI provider configured. Please add a provider in plugin settings.');
+        }
+
+        // Decrypt API key.
+        $config = clone $provider;
+        $config->apikey_decrypted = self::decrypt_apikey($provider->apikey);
+
+        // Parse models JSON.
+        $config->models_array = !empty($provider->models) ? json_decode($provider->models, true) : [];
+
+        return $config;
+    }
+
+    /**
+     * Create a new provider.
+     *
+     * @param \stdClass $data Provider data
+     * @return int New provider ID
+     */
+    public static function create(\stdClass $data): int {
+        global $DB;
+
+        // Debug: Check if we have data
+        if (empty($data->name)) {
+            throw new \Exception('Provider name is required');
+        }
+        if (empty($data->apikey)) {
+            throw new \Exception('API key is required for new providers');
+        }
+
+        $record = new \stdClass();
+        $record->name = trim($data->name);
+        $record->apikey = self::encrypt_apikey($data->apikey);
+        $record->baseurl = rtrim(trim($data->baseurl), '/');
+        $record->endpoint = trim($data->endpoint);
+        $record->api_format = in_array($data->api_format ?? '', ['openai', 'gemini']) ? $data->api_format : 'openai';
+        $record->models = json_encode($data->models ?? []);
+        $record->isdefault = isset($data->isdefault) ? (int)(bool)$data->isdefault : 0;
+        $record->enabled = isset($data->enabled) ? (int)(bool)$data->enabled : 1;
+        $record->sortorder = $data->sortorder ?? 0;
+        $record->timecreated = time();
+        $record->timemodified = time();
+
+        // If this is set as default, unset other defaults.
+        if ($record->isdefault) {
+            $DB->set_field('courseagent_providers', 'isdefault', 0, []);
+        }
+
+        $id = $DB->insert_record('courseagent_providers', $record);
+
+        if (!$id) {
+            throw new \Exception('Database insert failed - no ID returned');
+        }
+
+        return $id;
+    }
+
+    /**
+     * Update an existing provider.
+     *
+     * @param int $id Provider ID
+     * @param \stdClass $data Provider data
+     * @return bool Success
+     */
+    public static function update(int $id, \stdClass $data): bool {
+        global $DB;
+
+        $existing = $DB->get_record('courseagent_providers', ['id' => $id], '*', MUST_EXIST);
+
+        $existing->name = trim($data->name);
+        $existing->apikey = self::encrypt_apikey($data->apikey);
+        $existing->baseurl = rtrim(trim($data->baseurl), '/');
+        $existing->endpoint = trim($data->endpoint);
+        $existing->api_format = in_array($data->api_format ?? '', ['openai', 'gemini']) ? $data->api_format : 'openai';
+        $existing->models = json_encode($data->models ?? []);
+        $existing->isdefault = isset($data->isdefault) ? (int)(bool)$data->isdefault : 0;
+        $existing->enabled = isset($data->enabled) ? (int)(bool)$data->enabled : 1;
+        $existing->sortorder = $data->sortorder ?? $existing->sortorder;
+        $existing->timemodified = time();
+
+        // If this is set as default, unset other defaults.
+        if ($existing->isdefault) {
+            $DB->execute('UPDATE {courseagent_providers} SET isdefault = 0 WHERE id != ?', [$id]);
+        }
+
+        return $DB->update_record('courseagent_providers', $existing);
+    }
+
+    /**
+     * Delete a provider.
+     *
+     * @param int $id Provider ID
+     * @return bool Success
+     */
+    public static function delete(int $id): bool {
+        global $DB;
+        return $DB->delete_records('courseagent_providers', ['id' => $id]);
+    }
+
+    /**
+     * Set provider as default.
+     *
+     * @param int $id Provider ID
+     * @return bool Success
+     */
+    public static function set_default(int $id): bool {
+        global $DB;
+
+        // Unset all defaults.
+        $DB->set_field('courseagent_providers', 'isdefault', 0, []);
+
+        // Set new default.
+        return $DB->set_field('courseagent_providers', 'isdefault', 1, ['id' => $id]);
+    }
+
+    /**
+     * Toggle provider enabled status.
+     *
+     * @param int $id Provider ID
+     * @param bool $enabled Enable or disable
+     * @return bool Success
+     */
+    public static function set_enabled(int $id, bool $enabled): bool {
+        global $DB;
+        return $DB->set_field('courseagent_providers', 'enabled', $enabled ? 1 : 0, ['id' => $id]);
+    }
+
+    /**
+     * Test API connection with raw parameters (for unsaved forms).
+     * Sends a simple test request to verify API credentials.
+     *
+     * @param string $baseurl Base URL of the API
+     * @param string $endpoint Endpoint path (e.g., 'chat/completions')
+     * @param string $apikey API key
+     * @param string|null $model Optional model ID
+     * @return \stdClass Test result with success, message, httpcode, and ai_response
+     */
+    public static function test_connection_raw(string $baseurl, string $endpoint, string $apikey, ?string $model = null, string $apiformat = 'openai'): \stdClass {
+        global $CFG;
+
+        $result = new \stdClass();
+        $result->success = false;
+        $result->message = '';
+        $result->response = null;
+        $result->httpcode = 0;
+        $result->ai_response = null;
+
+        // Debug info - will be returned for console logging.
+        $result->debug = new \stdClass();
+        $result->debug->extraction_attempts = [];
+
+        // Start timing.
+        $starttime = microtime(true);
+
+        try {
+            // Normalize base URL.
+            $baseurl = rtrim(trim($baseurl), '/');
+            $endpoint = trim($endpoint);
+            // Build URL - only add slash and endpoint if endpoint is not empty.
+            $url = $endpoint ? ($baseurl . '/' . $endpoint) : $baseurl;
+            if ($model && strpos($url, '{model}') !== false) {
+                $url = str_replace('{model}', $model, $url);
+            }
+            // Determine API type from explicit format parameter passed from form.
+            // Fall back to URL sniffing only as a last resort for legacy callers.
+            $isgemini = ($apiformat === 'gemini');
+            $apitype = $isgemini ? 'Gemini' : 'OpenAI-compatible';
+
+            // Build headers array.
+            $headers = ['Content-Type: application/json'];
+            if ($isgemini) {
+                $testurl = $url . '?key=' . $apikey;
+                $testprompt = 'Say "Connection successful" in exactly those words.';
+                $requestmodel = null;
+                $data = [
+                    'contents' => [
+                        ['parts' => [['text' => $testprompt]]],
+                    ],
+                    'generationConfig' => [
+                        'maxOutputTokens' => 50,
+                    ],
+                ];
+            } else {
+                $requestmodel = $model ?: '';
+                $testurl = $url;
+                $testprompt = 'Say "Connection successful" in exactly those words.';
+                $data = [
+                    'model' => $requestmodel,
+                    'messages' => [
+                        ['role' => 'user', 'content' => $testprompt],
+                    ],
+                    'max_tokens' => 50,
+                    'stream' => false,
+                ];
+                if (!empty($apikey)) {
+                    $headers[] = 'Authorization: Bearer ' . substr($apikey, 0, 8) . '...';
+                }
+            }
+
+            // Store debug info (mask API key for security).
+            $result->debug->api_type = $apitype;
+            $result->debug->base_url = $baseurl;
+            $result->debug->endpoint = $endpoint ?: '(none - using base URL directly)';
+            $result->debug->model = $requestmodel ?? '(not applicable for Gemini)';
+            $result->debug->full_url = $isgemini ? ($url . '?key=' . substr($apikey, 0, 8) . '...') : $url;
+            $result->debug->request_method = 'POST';
+            $result->debug->request_headers = $headers;
+            $result->debug->request_payload = $data;
+
+            // Enhanced request construction details.
+            $result->debug->request_construction = [
+                'is_gemini' => $isgemini,
+                'api_format_used' => $apiformat,
+                'url_building' => [
+                    'base_url_input' => $baseurl,
+                    'endpoint_input' => $endpoint,
+                    'url_before_key' => $url,
+                    'final_url_used' => $testurl,
+                ],
+                'api_key_present' => !empty($apikey),
+                'api_key_length' => strlen($apikey),
+                'api_key_preview' => !empty($apikey) ? substr($apikey, 0, 4) . '...' . substr($apikey, -4) : 'N/A',
+            ];
+
+            // Execute request using Moodle's curl class (handles SSL, proxy, $CFG->cacert automatically).
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader(['Content-Type: application/json']);
+            if (!$isgemini && !empty($apikey)) {
+                $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
+            }
+            $moodlecurl->setTimeout(30);
+            $moodlecurl->setConnectTimeout(10);
+
+            $response = $moodlecurl->post($testurl, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error = $moodlecurl->error;
+
+            $result->httpcode = $httpcode;
+            $result->response = json_decode($response);
+            $result->debug->response_raw = $response;
+            $result->debug->response_parsed = $result->response;
+
+            // Response processing details.
+            $result->debug->response_processing = [
+                'http_code_received' => $httpcode,
+                'curl_error' => $error ?: null,
+                'raw_response_length' => strlen($response),
+                'json_decode_success' => json_last_error() === JSON_ERROR_NONE,
+                'json_decode_error' => json_last_error() !== JSON_ERROR_NONE ? json_last_error_msg() : null,
+                'response_structure' => self::analyzeresponsestructure($result->response),
+            ];
+
+            if ($error) {
+                $result->message = 'cURL Error: ' . $error;
+                $result->debug->curl_error = $error;
+            } else if ($httpcode >= 200 && $httpcode < 300) {
+                $result->success = true;
+                $result->message = 'Connection successful! API responded with HTTP ' . $httpcode;
+
+                // Try to extract response text with detailed logging.
+                if ($isgemini) {
+                    // Log extraction attempts for Gemini.
+                    $result->debug->extraction_attempts[] = [
+                        'step' => 1,
+                        'path' => 'candidates',
+                        'exists' => isset($result->response->candidates),
+                        'type' => isset($result->response->candidates) ? gettype($result->response->candidates) : null,
+                        'count' => isset($result->response->candidates) && is_array($result->response->candidates)
+                            ? count($result->response->candidates)
+                            : null,
+                    ];
+
+                    if (isset($result->response->candidates[0])) {
+                        $result->debug->extraction_attempts[] = [
+                            'step' => 2,
+                            'path' => 'candidates[0].content',
+                            'exists' => isset($result->response->candidates[0]->content),
+                            'type' => isset($result->response->candidates[0]->content)
+                                ? gettype($result->response->candidates[0]->content)
+                                : null,
+                        ];
+
+                        if (isset($result->response->candidates[0]->content->parts)) {
+                            $result->debug->extraction_attempts[] = [
+                                'step' => 3,
+                                'path' => 'candidates[0].content.parts',
+                                'exists' => true,
+                                'type' => gettype($result->response->candidates[0]->content->parts),
+                                'count' => is_array($result->response->candidates[0]->content->parts)
+                                    ? count($result->response->candidates[0]->content->parts)
+                                    : null,
+                            ];
+
+                            if (isset($result->response->candidates[0]->content->parts[0]->text)) {
+                                $result->ai_response = $result->response->candidates[0]->content->parts[0]->text;
+                                $result->debug->extraction_attempts[] = [
+                                    'step' => 4,
+                                    'path' => 'candidates[0].content.parts[0].text',
+                                    'exists' => true,
+                                    'value_preview' => substr($result->response->candidates[0]->content->parts[0]->text, 0, 100),
+                                ];
+                            }
+                        }
+                    }
+                } else {
+                    // Log extraction attempts for OpenAI.
+                    $result->debug->extraction_attempts[] = [
+                        'step' => 1,
+                        'path' => 'choices',
+                        'exists' => isset($result->response->choices),
+                        'type' => isset($result->response->choices) ? gettype($result->response->choices) : null,
+                        'count' => isset($result->response->choices) && is_array($result->response->choices)
+                            ? count($result->response->choices)
+                            : null,
+                    ];
+
+                    if (isset($result->response->choices[0])) {
+                        $result->debug->extraction_attempts[] = [
+                            'step' => 2,
+                            'path' => 'choices[0].message',
+                            'exists' => isset($result->response->choices[0]->message),
+                            'type' => isset($result->response->choices[0]->message)
+                                ? gettype($result->response->choices[0]->message)
+                                : null,
+                        ];
+
+                        if (isset($result->response->choices[0]->message->content)) {
+                            $result->ai_response = $result->response->choices[0]->message->content;
+                            $result->debug->extraction_attempts[] = [
+                                'step' => 3,
+                                'path' => 'choices[0].message.content',
+                                'exists' => true,
+                                'value_preview' => substr($result->response->choices[0]->message->content, 0, 100),
+                            ];
+                        }
+                    }
+                }
+            } else {
+                $result->message = 'API Error: HTTP ' . $httpcode;
+                if ($result->response && !empty($result->response->error->message)) {
+                    $result->message .= ' - ' . $result->response->error->message;
+                }
+            }
+        } catch (\Exception $e) {
+            $result->message = 'Exception: ' . $e->getMessage();
+            $result->debug->exception = $e->getMessage();
+        }
+
+        // Add timing information.
+        $result->debug->timing = [
+            'request_duration_ms' => round((microtime(true) - $starttime) * 1000, 2),
+        ];
+
+        return $result;
+    }
+
+    /**
+     * Test API connection.
+     * Sends a simple test request to verify API credentials.
+     *
+     * @param int $providerid Provider ID
+     * @return \stdClass Test result with success, message, and response
+     */
+    public static function test_connection(int $providerid): \stdClass {
+        global $CFG;
+
+        $config = self::get_config($providerid);
+        $result = new \stdClass();
+        $result->success = false;
+        $result->message = '';
+        $result->response = null;
+        $result->httpcode = 0;
+
+        // Debug info - will be returned for console logging.
+        $result->debug = new \stdClass();
+        $result->debug->extraction_attempts = [];
+
+        // Start timing.
+        $starttime = microtime(true);
+
+        try {
+            // Build test URL - only add slash and endpoint if endpoint is not empty.
+            $url = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
+            $requestmodel = !empty($config->models_array) ? $config->models_array[0] : '';
+            if ($requestmodel && strpos($url, '{model}') !== false) {
+                $url = str_replace('{model}', $requestmodel, $url);
+            }
+            $apikey = $config->apikey_decrypted;
+
+            // Determine API type from stored provider format
+            $isgemini = ($config->api_format === 'gemini');
+            $apitype = $isgemini ? 'Gemini' : 'OpenAI-compatible';
+
+            // Build headers array
+            $headers = ['Content-Type: application/json'];
+            if ($isgemini) {
+                $testurl = $url . '?key=' . $apikey;
+                $testprompt = 'Say "Connection successful" in exactly those words.';
+                $data = [
+                    'contents' => [
+                        ['parts' => [['text' => $testprompt]]],
+                    ],
+                    'generationConfig' => [
+                        'maxOutputTokens' => 50,
+                    ],
+                ];
+            } else {
+                $testurl = $url;
+                $testprompt = 'Say "Connection successful" in exactly those words.';
+                $data = [
+                    'model' => $requestmodel,
+                    'messages' => [
+                        ['role' => 'user', 'content' => $testprompt],
+                    ],
+                    'max_tokens' => 50,
+                    'stream' => false,
+                ];
+                if (!empty($apikey)) {
+                    $headers[] = 'Authorization: Bearer ' . substr($apikey, 0, 8) . '...';
+                }
+            }
+
+            // Store debug info.
+            $result->debug->provider_id = $providerid;
+            $result->debug->provider_name = $config->name;
+            $result->debug->api_type = $apitype;
+            $result->debug->base_url = $config->baseurl;
+            $result->debug->endpoint = $config->endpoint ?: '(none - using base URL directly)';
+            $result->debug->model = $requestmodel ?? '(not applicable for Gemini)';
+            $result->debug->models_available = $config->models_array;
+            $result->debug->full_url = $isgemini ? ($url . '?key=' . substr($apikey, 0, 8) . '...') : $url;
+            $result->debug->request_method = 'POST';
+            $result->debug->request_headers = $headers;
+            $result->debug->request_payload = $data;
+
+            // Enhanced request construction details.
+            $result->debug->request_construction = [
+                'is_gemini' => $isgemini,
+                'api_format_used' => $config->api_format ?? 'openai',
+                'url_building' => [
+                    'base_url_input' => $config->baseurl,
+                    'endpoint_input' => $config->endpoint,
+                    'url_before_key' => $url,
+                    'final_url_used' => $testurl,
+                ],
+                'api_key_present' => !empty($apikey),
+                'api_key_length' => strlen($apikey),
+                'api_key_preview' => !empty($apikey) ? substr($apikey, 0, 4) . '...' . substr($apikey, -4) : 'N/A',
+            ];
+
+            // Execute request using Moodle's curl class (handles SSL, proxy, $CFG->cacert automatically).
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader($headers);
+            $moodlecurl->setTimeout(30);
+            $moodlecurl->setConnectTimeout(10);
+
+            $response = $moodlecurl->post($testurl, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error = $moodlecurl->error;
+
+            $result->httpcode = $httpcode;
+            $result->response = json_decode($response);
+            $result->debug->response_raw = $response;
+            $result->debug->response_parsed = $result->response;
+
+            // Response processing details.
+            $result->debug->response_processing = [
+                'http_code_received' => $httpcode,
+                'curl_error' => $error ?: null,
+                'raw_response_length' => strlen($response),
+                'json_decode_success' => json_last_error() === JSON_ERROR_NONE,
+                'json_decode_error' => json_last_error() !== JSON_ERROR_NONE ? json_last_error_msg() : null,
+                'response_structure' => self::analyzeresponsestructure($result->response),
+            ];
+
+            if ($error) {
+                $result->message = 'cURL Error: ' . $error;
+                $result->debug->curl_error = $error;
+            } else if ($httpcode >= 200 && $httpcode < 300) {
+                $result->success = true;
+                $result->message = 'Connection successful! API responded with HTTP ' . $httpcode;
+
+                // Try to extract response text with detailed logging.
+                if ($isgemini) {
+                    // Log extraction attempts for Gemini.
+                    $result->debug->extraction_attempts[] = [
+                        'step' => 1,
+                        'path' => 'candidates',
+                        'exists' => isset($result->response->candidates),
+                        'type' => isset($result->response->candidates) ? gettype($result->response->candidates) : null,
+                        'count' => isset($result->response->candidates) && is_array($result->response->candidates)
+                            ? count($result->response->candidates)
+                            : null,
+                    ];
+
+                    if (isset($result->response->candidates[0])) {
+                        $result->debug->extraction_attempts[] = [
+                            'step' => 2,
+                            'path' => 'candidates[0].content',
+                            'exists' => isset($result->response->candidates[0]->content),
+                            'type' => isset($result->response->candidates[0]->content)
+                                ? gettype($result->response->candidates[0]->content)
+                                : null,
+                        ];
+
+                        if (isset($result->response->candidates[0]->content->parts)) {
+                            $result->debug->extraction_attempts[] = [
+                                'step' => 3,
+                                'path' => 'candidates[0].content.parts',
+                                'exists' => true,
+                                'type' => gettype($result->response->candidates[0]->content->parts),
+                                'count' => is_array($result->response->candidates[0]->content->parts)
+                                    ? count($result->response->candidates[0]->content->parts)
+                                    : null,
+                            ];
+
+                            if (isset($result->response->candidates[0]->content->parts[0]->text)) {
+                                $result->ai_response = $result->response->candidates[0]->content->parts[0]->text;
+                                $result->debug->extraction_attempts[] = [
+                                    'step' => 4,
+                                    'path' => 'candidates[0].content.parts[0].text',
+                                    'exists' => true,
+                                    'value_preview' => substr($result->response->candidates[0]->content->parts[0]->text, 0, 100),
+                                ];
+                            }
+                        }
+                    }
+                } else {
+                    // Log extraction attempts for OpenAI.
+                    $result->debug->extraction_attempts[] = [
+                        'step' => 1,
+                        'path' => 'choices',
+                        'exists' => isset($result->response->choices),
+                        'type' => isset($result->response->choices) ? gettype($result->response->choices) : null,
+                        'count' => isset($result->response->choices) && is_array($result->response->choices)
+                            ? count($result->response->choices)
+                            : null,
+                    ];
+
+                    if (isset($result->response->choices[0])) {
+                        $result->debug->extraction_attempts[] = [
+                            'step' => 2,
+                            'path' => 'choices[0].message',
+                            'exists' => isset($result->response->choices[0]->message),
+                            'type' => isset($result->response->choices[0]->message)
+                                ? gettype($result->response->choices[0]->message)
+                                : null,
+                        ];
+
+                        if (isset($result->response->choices[0]->message->content)) {
+                            $result->ai_response = $result->response->choices[0]->message->content;
+                            $result->debug->extraction_attempts[] = [
+                                'step' => 3,
+                                'path' => 'choices[0].message.content',
+                                'exists' => true,
+                                'value_preview' => substr($result->response->choices[0]->message->content, 0, 100),
+                            ];
+                        }
+                    }
+                }
+            } else {
+                $result->message = 'API Error: HTTP ' . $httpcode;
+                if ($result->response && !empty($result->response->error->message)) {
+                    $result->message .= ' - ' . $result->response->error->message;
+                }
+            }
+        } catch (\Exception $e) {
+            $result->message = 'Exception: ' . $e->getMessage();
+            $result->debug->exception = $e->getMessage();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Call AI API with a prompt.
+     *
+     * @param string $prompt The prompt to send
+     * @param int|null $providerid Provider ID or null for default
+     * @param string|null $model Model to use or null for first available
+     * @return string AI response text
+     * @throws \Exception On API error
+     */
+    public static function call_api(string $prompt, ?int $providerid = null, ?string $model = null): string {
+        $config = self::get_config($providerid);
+        $apikey = $config->apikey_decrypted;
+        // Build URL - only add slash and endpoint if endpoint is not empty.
+        $url = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
+        if ($model && strpos($url, '{model}') !== false) {
+            $url = str_replace('{model}', $model, $url);
+        }
+
+        // Determine model.
+        $model = $model ?? (!empty($config->models_array) ? $config->models_array[0] : '');
+
+        // Use the explicit api_format stored with the provider — no URL sniffing.
+        $isgemini = ($config->api_format === 'gemini');
+
+        if ($isgemini) {
+            // Gemini API format.
+            $url .= '?key=' . $apikey;
+            $data = [
+                'contents' => [
+                    ['parts' => [['text' => $prompt]]],
+                ],
+                'generationConfig' => [
+                    'maxOutputTokens' => 8192,
+                ],
+            ];
+
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader(['Content-Type: application/json']);
+            $moodlecurl->setTimeout(120);
+            $moodlecurl->setConnectTimeout(15);
+
+            $response = $moodlecurl->post($url, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error = $moodlecurl->error;
+        } else {
+            // OpenAI-compatible format.
+            $data = [
+                'model' => $model,
+                'messages' => [
+                    ['role' => 'user', 'content' => $prompt],
+                ],
+                'stream' => false,
+            ];
+
+            $moodlecurl = new \curl();
+            $moodlecurl->setHeader(['Content-Type: application/json']);
+            $moodlecurl->setHeader(['Authorization: Bearer ' . $apikey]);
+            $moodlecurl->setTimeout(120);
+            $moodlecurl->setConnectTimeout(15);
+
+            $response = $moodlecurl->post($url, json_encode($data));
+            $httpcode = (int) ($moodlecurl->get_info()['http_code'] ?? 0);
+            $error = $moodlecurl->error;
+        }
+
+        if ($error) {
+            throw new \Exception('API request failed: ' . $error);
+        }
+
+        if ($httpcode < 200 || $httpcode >= 300) {
+            $errdata = json_decode($response);
+            $errmsg = $errdata->error->message ?? $response;
+            throw new \Exception('API error (HTTP ' . $httpcode . '): ' . $errmsg);
+        }
+
+        $result = json_decode($response);
+
+        if ($isgemini) {
+            if (empty($result->candidates[0]->content->parts[0]->text)) {
+                throw new \Exception('Invalid Gemini API response format');
+            }
+            return $result->candidates[0]->content->parts[0]->text;
+        } else {
+            if (empty($result->choices[0]->message->content)) {
+                throw new \Exception('Invalid OpenAI API response format');
+            }
+            return $result->choices[0]->message->content;
+        }
+    }
+
+    /**
+     * Analyze response structure for debugging extraction issues.
+     *
+     * @param mixed $response Parsed JSON response
+     * @return array Structure analysis
+     */
+    private static function analyzeresponsestructure($response): array {
+        if (!is_object($response) && !is_array($response)) {
+            return ['type' => gettype($response), 'error' => 'Response is not an object/array'];
+        }
+
+        $analysis = ['type' => gettype($response)];
+
+        if (is_object($response)) {
+            $analysis['top_level_keys'] = array_keys((array)$response);
+
+            // Check for Gemini structure
+            if (isset($response->candidates)) {
+                $analysis['candidates_type'] = gettype($response->candidates);
+                $analysis['candidates_count'] = is_array($response->candidates) ? count($response->candidates) : 'not array';
+                if (is_array($response->candidates) && isset($response->candidates[0])) {
+                    $analysis['candidate_0_keys'] = array_keys((array)$response->candidates[0]);
+                    if (isset($response->candidates[0]->content)) {
+                        $analysis['candidate_0_content_keys'] = array_keys((array)$response->candidates[0]->content);
+                        if (isset($response->candidates[0]->content->parts)) {
+                            $analysis['candidate_0_parts_type'] = gettype($response->candidates[0]->content->parts);
+                            $analysis['candidate_0_parts_count'] = is_array($response->candidates[0]->content->parts)
+                                ? count($response->candidates[0]->content->parts)
+                                : 'not array';
+                        }
+                    }
+                }
+            }
+
+            // Check for OpenAI structure
+            if (isset($response->choices)) {
+                $analysis['choices_type'] = gettype($response->choices);
+                $analysis['choices_count'] = is_array($response->choices) ? count($response->choices) : 'not array';
+                if (is_array($response->choices) && isset($response->choices[0])) {
+                    $analysis['choice_0_keys'] = array_keys((array)$response->choices[0]);
+                    if (isset($response->choices[0]->message)) {
+                        $analysis['choice_0_message_keys'] = array_keys((array)$response->choices[0]->message);
+                    }
+                }
+            }
+
+            // Check for error structure
+            if (isset($response->error)) {
+                $analysis['error_structure'] = array_keys((array)$response->error);
+            }
+        }
+
+        return $analysis;
+    }
+}

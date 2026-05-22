@@ -21,30 +21,40 @@ User Request → index.php → AMD JS → ajax.php → classes/api.php → AI Pr
 | File | Purpose |
 |------|---------|
 | `index.php` | Main course creation UI — two-column layout (form + preview) |
-| `ajax.php` | AJAX endpoint: `generate`, `publish`, `ai_assist`, `edit_item`, `test_provider`, `get_models`, `extract_content`, `get_progress` |
+| `ajax.php` | AJAX endpoint: `plan`, `generate`, `publish`, `ai_assist`, `edit_item`, `test_provider`, `test_provider_raw`, `get_models`, `extract_content`, `get_progress`, `clear_chat` |
 | `providers.php` | Provider management (CRUD, test connections, set default, presets) |
 | `mycourses.php` | Course history — user's generated courses |
 | `settings.php` | Admin settings: max sections, quiz questions, assignments toggle |
 
 ## Course Generation Flow
 
-1. **Generate** (`ajax.php?action=generate`):
-   - User submits topic, level, sections, quiz/assignment prefs
-   - `api.php::generate_course_outline()` builds prompt
-   - `provider::call_api()` sends to configured provider
-   - AI returns JSON → stored in `$SESSION->courseagent_preview` → displayed in preview
+**Free users:** Form → Generate → Preview → Publish  
+**Paid users** (`saas_api_key` set): Form → AI plans structure → Teacher approves modal → Generate (with plan scaffold) → Preview → Publish
 
-2. **AI Assist / Edit** (`ajax.php?action=ai_assist`):
+1. **Plan** (`ajax.php?action=plan`) — *paid users only*:
+   - Same form inputs as generate
+   - `api.php::plan_course_outline()` calls AI for structure-only JSON (no lesson content)
+   - Returns `{title, summary, sections[{name, description, lesson, quiz, assignment, h5p_type, h5p_reason}]}`
+   - Stored in `$SESSION->courseagent_plan`; JS shows approval modal
+
+2. **Generate** (`ajax.php?action=generate`):
+   - `use_plan=1` → reads `$SESSION->courseagent_plan`, passes to `generate_course_outline()`
+   - `build_generation_prompt($plan)` injects approved section names + activity list as scaffold
+   - After generation, plan decisions stamped onto sections: `quiz_planned`, `assignment_planned`, `h5p_type`
+   - Result stored in `$SESSION->courseagent_preview`
+
+3. **AI Assist / Edit** (`ajax.php?action=ai_assist`):
    - Chat panel sends `{user_prompt, context_hint}` — **no full course in body**
    - Server reads course from `$SESSION->courseagent_preview`
    - `api.php::ai_assist()` detects intent (from hint or AI), generates only the changed item
    - Returns surgical `delta` — client patches its local copy; session stores full merged course
    - See `.claude/docs/ai-assist.md` for full detail
 
-3. **Publish** (`ajax.php?action=publish`):
-   - `api.php::publish_course()` validates
+4. **Publish** (`ajax.php?action=publish`):
+   - `api.php::publish_course()` returns `array{courseid: int, h5p_warnings: string[]}` (not int)
    - `create_course()` → `course_create_sections_if_missing()`
-   - Adds modules: `mod_page` (lessons), `mod_quiz`, `mod_assign`
+   - Adds modules: `mod_page` (lessons), `mod_quiz` (if `quiz_planned` true or fallback), `mod_assign` (if `assignment_planned` true or fallback)
+   - If `$coursedata->_include_h5p` and SaaS key set: calls `create_h5p_activities()` per section
    - Saves session to DB
 
 ## File Map

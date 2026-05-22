@@ -20,6 +20,16 @@ Each DB row in `courseagent_providers`:
 
 Preset buttons auto-fill the form. Currently supported:
 
+**OpenRouter** (recommended — #1 in fallback chain)
+- Base URL: `https://openrouter.ai`
+- Endpoint: `api/v1/chat/completions`
+- Format: `openai`
+- Free models:
+  - `meta-llama/llama-3.3-70b-instruct:free` ★ default
+  - `google/gemma-3-27b-it:free`
+  - `deepseek/deepseek-r1-0528:free`
+  - `microsoft/phi-4:free`
+
 **Google Gemini**
 - Base URL: `https://generativelanguage.googleapis.com`
 - Endpoint: `v1beta/models/{model}:generateContent`

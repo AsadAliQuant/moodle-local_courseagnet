@@ -272,7 +272,8 @@ body.local-courseagent-preview-flush #page.drawers div[role="main"] {
 #courseagent-preview-app {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 60px);
+    margin-top: var(--ca-navbar-height, 61px);
+    height: calc(100vh - var(--ca-navbar-height, 61px));
     min-height: 500px;
     overflow: hidden;
 }

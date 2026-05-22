@@ -44,6 +44,8 @@ $PAGE->set_pagelayout('base');
 $maxsections      = get_config('local_courseagent', 'max_sections') ?: 8;
 $maxquiz          = get_config('local_courseagent', 'max_quiz_questions') ?: 7;
 $enableassignments = get_config('local_courseagent', 'enable_assignments') ?: 1;
+$saasapikey       = get_config('local_courseagent', 'saas_api_key') ?: '';
+$hassaaskey       = !empty($saasapikey);
 
 // Get available providers.
 $providers       = provider::get_all(true);
@@ -78,6 +80,7 @@ $jsconfig = [
     'maxSections'       => (int)  $maxsections,
     'maxQuizQuestions'  => (int)  $maxquiz,
     'enableAssignments' => (bool) $enableassignments,
+    'hasSaasKey'        => (bool) $hassaaskey,
     'providers'         => $providerconfig,
     'defaultProviderId' => $defaultprovider ? $defaultprovider->id : 0,
 ];
@@ -239,7 +242,7 @@ echo $OUTPUT->header();
                             </div>
 
                             <!-- Include SVG -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border">
+                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
                                 <div class="d-flex align-items-center">
                                     <div class="mr-3">
                                         <span class="badge badge-info rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
@@ -257,6 +260,28 @@ echo $OUTPUT->header();
                                     <label class="custom-control-label" for="use-svg"></label>
                                 </div>
                             </div>
+
+                            <?php if ($hassaaskey) : ?>
+                            <!-- Generate H5P Activities (SaaS) -->
+                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border">
+                                <div class="d-flex align-items-center">
+                                    <div class="mr-3">
+                                        <span class="badge badge-success rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
+                                              style="width:2.5rem;height:2.5rem;">
+                                            <i class="fa fa-cubes"></i>
+                                        </span>
+                                    </div>
+                                    <div>
+                                        <div class="font-weight-bold"><?php print_string('include_h5p', 'local_courseagent'); ?></div>
+                                        <div class="small text-muted"><?php print_string('include_h5p_desc', 'local_courseagent'); ?></div>
+                                    </div>
+                                </div>
+                                <div class="custom-control custom-switch">
+                                    <input type="checkbox" class="custom-control-input" id="include-h5p">
+                                    <label class="custom-control-label" for="include-h5p"></label>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                         </div>
 
                         <hr class="my-4">
@@ -364,8 +389,8 @@ echo $OUTPUT->header();
         </div>
 
         <!-- Header -->
-        <h4 class="mb-2"><?php print_string('generating_course', 'local_courseagent'); ?></h4>
-        <p class="text-muted mb-4"><?php print_string('generating_course_desc', 'local_courseagent'); ?></p>
+        <h4 id="ca-loading-title" class="mb-2"><?php print_string('generating_course', 'local_courseagent'); ?></h4>
+        <p id="ca-loading-desc" class="text-muted mb-4"><?php print_string('generating_course_desc', 'local_courseagent'); ?></p>
 
         <!-- Progress bar -->
         <div class="progress mb-1" style="height:6px;">
@@ -397,6 +422,36 @@ echo $OUTPUT->header();
         <div class="text-center mt-4">
             <button type="button" id="btn-cancel-generate" class="btn btn-outline-secondary btn-sm">
                 <i class="fa fa-times fa-fw" aria-hidden="true"></i> <?php print_string('cancel', 'local_courseagent'); ?>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Plan approval modal (paid users only — populated by JS after plan API call) -->
+<div id="ca-plan-modal" class="ca-loading-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ca-plan-modal-title">
+    <div class="ca-loading-modal-content" style="max-width:660px;max-height:82vh;overflow-y:auto;">
+        <div class="mb-3">
+            <span class="badge badge-success px-3 py-2 mb-2" style="font-size:0.75em;letter-spacing:.04em;">
+                <i class="fa fa-magic fa-fw" aria-hidden="true"></i> AI Curriculum Plan
+            </span>
+            <h4 id="ca-plan-modal-title" class="mb-1 font-weight-bold"></h4>
+            <p id="ca-plan-summary" class="text-muted small mb-0"></p>
+        </div>
+
+        <hr class="my-3">
+
+        <p class="small text-muted mb-3"><?php print_string('course_plan_subtitle', 'local_courseagent'); ?></p>
+
+        <div id="ca-plan-sections" class="list-group list-group-flush mb-4"></div>
+
+        <div class="d-flex justify-content-between align-items-center mt-2">
+            <button type="button" id="btn-plan-edit" class="btn btn-outline-secondary">
+                <i class="fa fa-pencil fa-fw" aria-hidden="true"></i>
+                <?php print_string('edit_topic_btn', 'local_courseagent'); ?>
+            </button>
+            <button type="button" id="btn-plan-approve" class="btn btn-success btn-lg">
+                <i class="fa fa-check fa-fw" aria-hidden="true"></i>
+                <?php print_string('approve_generate_btn', 'local_courseagent'); ?>
             </button>
         </div>
     </div>

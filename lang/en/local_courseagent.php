@@ -180,6 +180,51 @@ $string['js:course_published'] = 'Course published successfully!';
 $string['js:failed_publish'] = 'Failed to publish course';
 $string['js:error_publishing'] = 'An error occurred while publishing the course';
 
+// Plan approval flow strings.
+$string['course_plan_title'] = 'Your Course Plan';
+$string['course_plan_subtitle'] = 'Review the AI-designed structure before full generation begins.';
+$string['approve_generate_btn'] = 'Approve &amp; Generate Course';
+$string['edit_topic_btn'] = 'Edit Topic';
+$string['js:planning_course'] = 'Planning your course structure...';
+$string['js:plan_failed'] = 'Failed to plan course structure';
+$string['js:plan_error'] = 'An error occurred while planning the course';
+$string['js:generating_from_plan'] = 'Building Your Course from Plan...';
+$string['js:generating_from_plan_desc'] = 'Your approved plan is now being built into a full course.';
+$string['js:approve_generate'] = 'Approve &amp; Generate Course';
+$string['js:h5p_single_choice'] = 'H5P: Single Choice';
+$string['js:h5p_summary'] = 'H5P: Summary';
+$string['js:h5p_drag_words'] = 'H5P: Drag Words';
+$string['js:h5p_multiple_choice'] = 'H5P: Multiple Choice';
+$string['js:h5p_true_false'] = 'H5P: True/False';
+$string['js:h5p_fill_in_blanks'] = 'H5P: Fill in Blanks';
+$string['js:h5p_quiz_set'] = 'H5P: Quiz (Question Set)';
+$string['js:h5p_dialog_cards'] = 'H5P: Dialog Cards';
+$string['js:h5p_essay'] = 'H5P: Essay';
+$string['js:h5p_mark_the_words'] = 'H5P: Mark the Words';
+$string['js:h5p_sort_paragraphs'] = 'H5P: Sort Paragraphs';
+$string['js:h5p_crossword'] = 'H5P: Crossword';
+$string['js:h5p_find_the_words'] = 'H5P: Find the Words';
+$string['js:h5p_accordion'] = 'H5P: Accordion';
+$string['js:h5p_personality_quiz'] = 'H5P: Personality Quiz';
+$string['js:h5p_chart'] = 'H5P: Chart';
+$string['js:h5p_timeline'] = 'H5P: Timeline';
+
+// License settings strings.
+$string['saas_heading'] = 'CourseAgent License';
+$string['saas_heading_desc'] = 'Enter your license key to unlock paid advanced features. Leave blank to use local AI providers only.';
+$string['saas_api_key'] = 'License Key';
+$string['saas_api_key_desc'] = 'Your CourseAgent license key, received when activating your plan.';
+
+// H5P activity toggle on course creation form.
+$string['include_h5p'] = 'Generate H5P Activities';
+$string['include_h5p_desc'] = 'Generate interactive H5P activities for each section (requires a license key)';
+
+// SaaS error messages (user-visible).
+$string['h5p_quota_exceeded'] = 'Monthly H5P generation limit reached. Upgrade your plan to continue.';
+$string['h5p_paid_feature'] = 'H5P activity generation requires a paid CourseAgent plan. Contact your administrator to upgrade.';
+$string['h5p_rate_limited'] = 'Too many requests to the H5P service. Please try again shortly.';
+$string['h5p_service_unavailable'] = 'H5P generation service is temporarily unavailable. The course was published without H5P activities.';
+
 // Settings strings.
 $string['settings'] = 'Course Agent Settings';
 $string['generation_settings'] = 'Course Generation Settings';

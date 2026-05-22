@@ -238,6 +238,20 @@ if ($form) {
     // Preset buttons — only on the Add (not Edit) page.
     if ($isadding) {
         $presets = [
+            'openrouter' => [
+                'label'      => 'OpenRouter',
+                'icon'       => 'https://openrouter.ai/favicon.ico',
+                'name'       => 'OpenRouter',
+                'baseurl'    => 'https://openrouter.ai',
+                'endpoint'   => 'api/v1/chat/completions',
+                'api_format' => 'openai',
+                'models'     => [
+                    'meta-llama/llama-3.3-70b-instruct:free',
+                    'google/gemma-3-27b-it:free',
+                    'deepseek/deepseek-r1-0528:free',
+                    'microsoft/phi-4:free',
+                ],
+            ],
             'gemini' => [
                 'label'      => 'Google Gemini',
                 'icon'       => 'https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg',

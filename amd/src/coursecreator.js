@@ -25,10 +25,52 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
      * Initialize the course creator.
      * @param {Object} userConfig Configuration object from PHP
      */
+    const initH5pTypeSelector = function() {
+        if ($('#include-h5p').length === 0) return;
+
+        let pillsHtml = '';
+        Object.keys(H5P_LABELS).forEach(function(key) {
+            const label = H5P_LABELS[key].replace('H5P: ', '');
+            pillsHtml += '<label class="h5p-type-pill badge badge-secondary mr-1 mb-1"'
+                + ' style="cursor:pointer;font-size:0.75em;font-weight:normal;padding:5px 8px;">'
+                + '<input type="checkbox" class="h5p-type-check" value="' + key + '" checked'
+                + ' style="margin-right:4px;vertical-align:middle;"> ' + label + '</label>';
+        });
+
+        const html = '<div id="h5p-type-selector" class="mt-2 p-2 bg-white border rounded" style="display:none;">'
+            + '<div class="d-flex justify-content-between align-items-center mb-1">'
+            + '<small class="font-weight-bold text-muted">Content types the AI can choose:</small>'
+            + '<div><a href="#" id="h5p-select-all" class="small">All</a>'
+            + ' / <a href="#" id="h5p-deselect-all" class="small">None</a></div></div>'
+            + '<div class="d-flex flex-wrap">' + pillsHtml + '</div>'
+            + '<small id="h5p-type-error" class="text-danger" style="display:none;">'
+            + 'Please select at least one content type.</small>'
+            + '</div>';
+
+        $('#include-h5p').closest('.d-flex.align-items-center.justify-content-between').after(html);
+
+        $('#include-h5p').on('change', function() {
+            $('#h5p-type-selector').toggle($(this).is(':checked'));
+        });
+        if ($('#include-h5p').is(':checked')) {
+            $('#h5p-type-selector').show();
+        }
+
+        $('#h5p-select-all').on('click', function(e) {
+            e.preventDefault();
+            $('.h5p-type-check').prop('checked', true);
+        });
+        $('#h5p-deselect-all').on('click', function(e) {
+            e.preventDefault();
+            $('.h5p-type-check').prop('checked', false);
+        });
+    };
+
     const init = function(userConfig) {
         config = userConfig;
         setupEventListeners();
         setupDropzone();
+        initH5pTypeSelector();
 
         Str.get_strings([
             {key: 'js:auto_select',               component: 'local_courseagent'},
@@ -47,6 +89,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             {key: 'js:adding_quizzes_assignments', component: 'local_courseagent'},
             {key: 'js:adding_quizzes',             component: 'local_courseagent'},
             {key: 'js:adding_assignments',         component: 'local_courseagent'},
+            {key: 'js:planning_course',            component: 'local_courseagent'},
+            {key: 'js:plan_failed',                component: 'local_courseagent'},
+            {key: 'js:plan_error',                 component: 'local_courseagent'},
+            {key: 'js:generating_from_plan',      component: 'local_courseagent'},
+            {key: 'js:generating_from_plan_desc', component: 'local_courseagent'},
         ]).then(function(s) {
             strings = {
                 autoSelect:               s[0],
@@ -65,6 +112,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
                 addingQuizzesAssignments: s[13],
                 addingQuizzes:            s[14],
                 addingAssignments:        s[15],
+                planningCourse:           s[16],
+                planFailed:               s[17],
+                planError:                s[18],
+                generatingFromPlan:       s[19],
+                generatingFromPlanDesc:   s[20],
             };
             updateModelSelector();
             return strings;
@@ -268,6 +320,27 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
     // Course generation
     // -------------------------------------------------------------------------
 
+    // H5P type display labels.
+    const H5P_LABELS = {
+        'single_choice_set':  'H5P: Single Choice',
+        'summary':            'H5P: Summary',
+        'drag_the_words':     'H5P: Drag Words',
+        'multiple_choice':    'H5P: Multiple Choice',
+        'true_false':         'H5P: True/False',
+        'fill_in_blanks':     'H5P: Fill in Blanks',
+        'quiz_question_set':  'H5P: Quiz (Question Set)',
+        'dialog_cards':       'H5P: Dialog Cards',
+        'essay':              'H5P: Essay',
+        'mark_the_words':     'H5P: Mark the Words',
+        'sort_the_paragraphs':'H5P: Sort Paragraphs',
+        'crossword':          'H5P: Crossword',
+        'find_the_words':     'H5P: Find the Words',
+        'accordion':          'H5P: Accordion',
+        'personality_quiz':   'H5P: Personality Quiz',
+        'chart':              'H5P: Chart',
+        'timeline':           'H5P: Timeline',
+    };
+
     const generateCourseOutline = function() {
         const topic       = $('#course-topic').val().trim();
         const customTitle = $('#course-custom-title').val().trim();
@@ -277,29 +350,27 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
         const includeAssignment = $('#include-assignment').is(':checked');
         const useEmojis   = $('#use-emojis').is(':checked');
         const useSvg      = $('#use-svg').is(':checked');
+        const includeH5p  = config.hasSaasKey ? $('#include-h5p').is(':checked') : false;
+        const h5pTypes    = includeH5p
+            ? $('.h5p-type-check:checked').map(function() { return this.value; }).get().join(',')
+            : '';
 
         // Require topic OR uploaded file.
         if (!topic && !extractedFileText) {
-            Notification.addNotification({
-                message: strings.pleaseEnterTopic,
-                type: 'error'
-            });
+            Notification.addNotification({ message: strings.pleaseEnterTopic, type: 'error' });
             return;
         }
-
         if (numSections < 2 || numSections > config.maxSections) {
-            Notification.addNotification({
-                message: strings.sectionsRangeError,
-                type: 'error'
-            });
+            Notification.addNotification({ message: strings.sectionsRangeError, type: 'error' });
             return;
         }
+        if (includeH5p && h5pTypes === '') {
+            $('#h5p-type-error').show();
+            return;
+        }
+        $('#h5p-type-error').hide();
 
-        showProgress(includeQuiz, includeAssignment);
-        $('#btn-generate').prop('disabled', true);
-
-        const requestData = {
-            action:            'generate',
+        const formData = {
             topic:             topic,
             level:             level,
             numsections:       numSections,
@@ -307,20 +378,139 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             includeassignment: includeAssignment ? 1 : 0,
             useemojis:         useEmojis ? 1 : 0,
             usesvg:            useSvg ? 1 : 0,
+            includeh5p:        includeH5p ? 1 : 0,
+            h5p_types:         h5pTypes,
             provider:          $('#ai-provider').val() || 0,
             model:             $('#ai-model').val() || '',
             sesskey:           CoreConfig.sesskey,
             extracted_content: extractedFileText,
-            custom_title:      customTitle
+            custom_title:      customTitle,
         };
+
+        $('#btn-generate').prop('disabled', true);
+
+        if (config.hasSaasKey) {
+            // Paid flow: plan step first.
+            runPlanStep(formData, includeQuiz, includeAssignment);
+        } else {
+            // Free flow: generate directly.
+            showProgress(includeQuiz, includeAssignment);
+            runGenerateStep(formData, false, includeQuiz, includeAssignment);
+        }
+    };
+
+    // ── Plan step (paid users only) ──────────────────────────────────────────
+
+    const runPlanStep = function(formData, includeQuiz, includeAssignment) {
+        // Show spinner reusing the loading modal with a different heading.
+        $('#ca-loading-progress').css('width', '30%');
+        $('#ca-loading-percent').text('');
+        $('#ca-step-outline').find('.ca-step-label').text(strings.planningCourse || 'Planning your course...');
+        $('#ca-step-lessons, #ca-step-extras').hide();
+        $('#ca-loading-modal').show();
+
+        const planData = Object.assign({}, formData, { action: 'plan' });
+
+        $.ajax({
+            url:      CoreConfig.wwwroot + '/local/courseagent/ajax.php',
+            type:     'POST',
+            data:     planData,
+            dataType: 'json',
+            success:  function(response) {
+                $('#ca-loading-modal').hide();
+                // Restore steps for later.
+                $('#ca-step-lessons, #ca-step-extras').show();
+                if (response.success && response.plan) {
+                    showPlanModal(response.plan, formData, includeQuiz, includeAssignment);
+                } else {
+                    $('#btn-generate').prop('disabled', false);
+                    Notification.addNotification({
+                        message: response.error || strings.planFailed,
+                        type: 'error'
+                    });
+                }
+            },
+            error: function(xhr) {
+                $('#ca-loading-modal').hide();
+                $('#ca-step-lessons, #ca-step-extras').show();
+                $('#btn-generate').prop('disabled', false);
+                let msg = strings.planError || strings.planFailed;
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+                Notification.addNotification({ message: msg, type: 'error' });
+            }
+        });
+    };
+
+    const showPlanModal = function(plan, formData, includeQuiz, includeAssignment) {
+        // Populate title + summary.
+        $('#ca-plan-modal-title').text(plan.title || '');
+        $('#ca-plan-summary').text(plan.summary || '');
+
+        // Build section rows.
+        const $sections = $('#ca-plan-sections').empty();
+        (plan.sections || []).forEach(function(sec, idx) {
+            const $item = $('<div class="list-group-item px-3 py-2"></div>');
+
+            const $name = $('<div class="font-weight-bold mb-1"></div>').text(
+                'Section ' + (idx + 1) + ': ' + (sec.name || '')
+            );
+            const $desc = $('<div class="small text-muted mb-2"></div>').text(sec.description || '');
+
+            const $badges = $('<div class="mb-1"></div>');
+            $badges.append('<span class="badge badge-primary mr-1">Lesson</span>');
+            if (sec.quiz) {
+                $badges.append('<span class="badge badge-info mr-1">Quiz</span>');
+            }
+            if (sec.assignment) {
+                $badges.append('<span class="badge badge-secondary mr-1">Assignment</span>');
+            }
+            if (sec.h5p_type) {
+                var label = H5P_LABELS[sec.h5p_type] || ('H5P: ' + sec.h5p_type);
+                $badges.append('<span class="badge badge-success mr-1">' + label + '</span>');
+            }
+
+            $item.append($name).append($desc).append($badges);
+
+            if (sec.h5p_reason && sec.h5p_type) {
+                $item.append(
+                    $('<div class="small text-muted font-italic mt-1"></div>').text(sec.h5p_reason)
+                );
+            }
+
+            $sections.append($item);
+        });
+
+        // Wire buttons.
+        $('#btn-plan-approve').off('click').on('click', function() {
+            hidePlanModal();
+            showProgress(includeQuiz, includeAssignment, true);
+            runGenerateStep(formData, true, includeQuiz, includeAssignment);
+        });
+        $('#btn-plan-edit').off('click').on('click', function() {
+            hidePlanModal();
+            $('#btn-generate').prop('disabled', false);
+        });
+
+        $('#ca-plan-modal').show();
+    };
+
+    const hidePlanModal = function() {
+        $('#ca-plan-modal').hide();
+    };
+
+    // ── Generate step (both flows) ───────────────────────────────────────────
+
+    const runGenerateStep = function(formData, usePlan, includeQuiz, includeAssignment) {
+        const requestData = Object.assign({}, formData, {
+            action:   'generate',
+            use_plan: usePlan ? 1 : 0,
+        });
 
         console.log('[CA DEBUG] Sending generate request:', {
             topic: requestData.topic,
             provider: requestData.provider,
-            model: requestData.model,
             numsections: requestData.numsections,
-            includequiz: requestData.includequiz,
-            includeassignment: requestData.includeassignment,
+            use_plan: requestData.use_plan,
             url: CoreConfig.wwwroot + '/local/courseagent/ajax.php'
         });
 
@@ -332,62 +522,34 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             success:  function(response) {
                 generateXhr = null;
                 console.log('[CA DEBUG] Generate success response:', response);
-
                 if (response.success) {
                     var redirectUrl = CoreConfig.wwwroot + '/local/courseagent/preview.php';
                     console.log('[CA DEBUG] Redirecting to:', redirectUrl);
-                    console.log('[CA DEBUG] used_provider:', response.used_provider, '| used_model:', response.used_model);
                     if (response.fallback_log && response.fallback_log.length > 0) {
-                        console.warn('[CA FALLBACK LOG] ' + response.fallback_log.length + ' attempt(s) before success:');
-                        console.table(response.fallback_log);
-                    } else {
-                        console.log('[CA FALLBACK LOG] First attempt succeeded — no fallbacks needed.');
+                        console.warn('[CA FALLBACK LOG]', response.fallback_log.length, 'attempt(s):', response.fallback_log);
                     }
                     window.location.href = redirectUrl;
                     return;
                 }
-
-                console.warn('[CA DEBUG] response.success=false. Error:', response.error);
+                console.warn('[CA DEBUG] generate failed:', response.error);
                 hideProgress();
                 $('#btn-generate').prop('disabled', false);
                 Notification.addNotification({
                     message: response.error || strings.failedGenerate,
-                    type:    'error'
+                    type: 'error'
                 });
             },
             error: function(xhr) {
                 generateXhr = null;
-                console.error('[CA DEBUG] XHR error. status:', xhr.status, 'statusText:', xhr.statusText);
-                console.error('[CA DEBUG] Raw responseText:', xhr.responseText);
-                // Aborted requests have status 0 — don't show error for user-initiated cancel.
-                if (xhr.status === 0 && xhr.statusText === 'abort') {
-                    console.log('[CA DEBUG] Request was user-cancelled (abort).');
-                    return;
-                }
+                if (xhr.status === 0 && xhr.statusText === 'abort') { return; }
                 hideProgress();
                 $('#btn-generate').prop('disabled', false);
                 let msg = strings.errorGenerating;
                 let parsed = null;
-                try {
-                    parsed = JSON.parse(xhr.responseText);
-                    msg = parsed.error || msg;
-                } catch (e) {
-                    console.error('[CA DEBUG] Server did not return valid JSON. Raw response text:', xhr.responseText);
-                    console.error('[CA DEBUG] This is likely a PHP fatal error (OOM/timeout) — check PHP error_log.');
+                try { parsed = JSON.parse(xhr.responseText); msg = parsed.error || msg; } catch (e) {}
+                if (parsed && parsed.fallback_log && parsed.fallback_log.length > 0) {
+                    console.error('[CA FALLBACK LOG]', parsed.fallback_log);
                 }
-                if (parsed) {
-                    console.error('[CA DEBUG] Server returned error object:', parsed);
-                    if (parsed.debug) {
-                        console.error('[CA DEBUG] Debug info from server:', parsed.debug);
-                    }
-                    if (parsed.fallback_log && parsed.fallback_log.length > 0) {
-                        console.error('[CA FALLBACK LOG] ' + parsed.fallback_log.length + ' failed attempt(s) before giving up:');
-                        console.table(parsed.fallback_log);
-                    } else {
-                        console.error('[CA FALLBACK LOG] No fallback_log in error response (PHP crashed before fallback loop completed).');
-                    }
-                }
-                console.error('[CA DEBUG] Error message shown to user:', msg);
                 Notification.addNotification({ message: msg, type: 'error' });
             }
         });
@@ -410,7 +572,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
     // Utilities
     // -------------------------------------------------------------------------
 
-    const showProgress = function(includeQuiz, includeAssignment) {
+    const showProgress = function(includeQuiz, includeAssignment, usePlan) {
         // Reset progress to 0.
         var $bar = $('#ca-loading-progress');
         var $pct = $('#ca-loading-percent');
@@ -441,6 +603,11 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
         $steps.find('.ca-step-bubble').html('');
         $steps.eq(0).addClass('ca-step-active').removeClass('ca-step-pending');
         $steps.eq(0).find('.ca-step-bubble').html('<i class="fa fa-hourglass-half" aria-hidden="true"></i>');
+
+        if (usePlan) {
+            $('#ca-loading-title').text(strings.generatingFromPlan);
+            $('#ca-loading-desc').text(strings.generatingFromPlanDesc);
+        }
 
         $('#ca-loading-modal').fadeIn(200);
 

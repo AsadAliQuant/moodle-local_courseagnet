@@ -78,6 +78,45 @@ register_shutdown_function(function() {
 
 try {
     switch ($action) {
+        case 'plan':
+            // Generate lightweight course plan (paid users only — called before full generation).
+            $topic             = optional_param('topic', '', PARAM_TEXT);
+            $level             = optional_param('level', 'intermediate', PARAM_TEXT);
+            $numsections       = optional_param('numsections', 4, PARAM_INT);
+            $includequiz       = optional_param('includequiz', true, PARAM_BOOL);
+            $includeassignment = optional_param('includeassignment', false, PARAM_BOOL);
+            $includeh5p        = optional_param('includeh5p', false, PARAM_BOOL);
+            $h5ptypes          = optional_param('h5p_types', '', PARAM_TEXT);
+            $providerid        = optional_param('provider', 0, PARAM_INT);
+            $model             = optional_param('model', '', PARAM_TEXT);
+            $extractedcontent  = optional_param('extracted_content', '', PARAM_RAW);
+            $customtitle       = optional_param('custom_title', '', PARAM_TEXT);
+
+            if (empty(trim($topic)) && empty(trim($extractedcontent))) {
+                throw new Exception(get_string('error_no_topic', 'local_courseagent'));
+            }
+
+            $api  = new api();
+            $plan = $api->plan_course_outline(
+                $topic,
+                $level,
+                $numsections,
+                $includequiz,
+                $includeassignment,
+                $includeh5p,
+                $providerid > 0 ? $providerid : null,
+                $model ?: null,
+                $extractedcontent ?: null,
+                $customtitle ?: null,
+                $h5ptypes
+            );
+
+            global $SESSION;
+            $SESSION->courseagent_plan = $plan;
+
+            echo json_encode(['success' => true, 'plan' => $plan]);
+            break;
+
         case 'generate':
             // Generate course outline using AI.
             $topic = optional_param('topic', '', PARAM_TEXT);
@@ -87,6 +126,9 @@ try {
             $includeassignment = optional_param('includeassignment', false, PARAM_BOOL);
             $useemojis = optional_param('useemojis', false, PARAM_BOOL);
             $usesvg = optional_param('usesvg', false, PARAM_BOOL);
+            $includeh5p = optional_param('includeh5p', false, PARAM_BOOL);
+            $h5ptypes   = optional_param('h5p_types', '', PARAM_TEXT);
+            $useplan = optional_param('use_plan', false, PARAM_BOOL);
             $providerid = optional_param('provider', 0, PARAM_INT);
             $model = optional_param('model', '', PARAM_TEXT);
             $extractedcontent = optional_param('extracted_content', '', PARAM_RAW);
@@ -104,6 +146,12 @@ try {
 
             courseagent_write_progress(1, 10, get_string('progress_preparing', 'local_courseagent'));
 
+            // Load approved plan from session when use_plan=1.
+            global $SESSION;
+            $approvedplan = ($useplan && !empty($SESSION->courseagent_plan))
+                ? $SESSION->courseagent_plan
+                : null;
+
             // Generate course using AI.
             $api = new api();
             $coursedata = $api->generate_course_outline(
@@ -117,8 +165,13 @@ try {
                 $extractedcontent ?: null,
                 $customtitle ?: null,
                 $useemojis,
-                $usesvg
+                $usesvg,
+                $approvedplan
             );
+
+            // Carry H5P preferences through to publish.
+            $coursedata->_include_h5p  = $includeh5p;
+            $coursedata->_h5p_types    = $h5ptypes;
 
             courseagent_write_progress(3, 95, get_string('progress_finalizing', 'local_courseagent'));
 
@@ -147,13 +200,14 @@ try {
             }
 
             $api = new api();
-            $courseid = $api->publish_course($coursedata);
-            $courseurl = new moodle_url('/course/view.php', ['id' => $courseid]);
+            $result = $api->publish_course($coursedata);
+            $courseurl = new moodle_url('/course/view.php', ['id' => $result['courseid']]);
 
             echo json_encode([
-                'success' => true,
-                'course_id' => $courseid,
-                'course_url' => $courseurl->out(false),
+                'success'      => true,
+                'course_id'    => $result['courseid'],
+                'course_url'   => $courseurl->out(false),
+                'h5p_warnings' => $result['h5p_warnings'],
             ]);
             break;
 
