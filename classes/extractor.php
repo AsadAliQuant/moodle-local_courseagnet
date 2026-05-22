@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle.
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -31,7 +32,8 @@ namespace local_courseagent;
  * Extracts readable plain text from uploaded documents.
  * Supported: TXT, MD, CSV, RTF, DOCX, PPTX, ODT, EPUB, PDF (basic).
  */
-class extractor {
+class Extractor
+{
     /**
      * Extract text from an uploaded file.
      *
@@ -41,7 +43,8 @@ class extractor {
      * @return string Extracted plain text
      * @throws \Exception on unreadable or unsupported file
      */
-    public function extract(string $tmppath, string $filename, int $maxchars = 100000): string {
+    public function extract(string $tmppath, string $filename, int $maxchars = 100000): string
+    {
         if (!is_readable($tmppath)) {
             throw new \Exception('Uploaded file is not readable on the server.');
         }
@@ -56,27 +59,27 @@ class extractor {
                 break;
 
             case 'rtf':
-                $text = $this->extract_rtf($tmppath);
+                $text = $this->extractRtf($tmppath);
                 break;
 
             case 'docx':
-                $text = $this->extract_zip_xml($tmppath, 'word/document.xml', ['w:t', 'w:delText']);
+                $text = $this->extractZipXml($tmppath, 'word/document.xml', ['w:t', 'w:delText']);
                 break;
 
             case 'pptx':
-                $text = $this->extract_zip_xml_glob($tmppath, 'ppt/slides/slide*.xml', ['a:t']);
+                $text = $this->extractZipXmlGlob($tmppath, 'ppt/slides/slide*.xml', ['a:t']);
                 break;
 
             case 'odt':
-                $text = $this->extract_zip_xml($tmppath, 'content.xml', ['text:p', 'text:span', 'text:h']);
+                $text = $this->extractZipXml($tmppath, 'content.xml', ['text:p', 'text:span', 'text:h']);
                 break;
 
             case 'epub':
-                $text = $this->extract_epub($tmppath);
+                $text = $this->extractEpub($tmppath);
                 break;
 
             case 'pdf':
-                $text = $this->extract_pdf($tmppath);
+                $text = $this->extractPdf($tmppath);
                 break;
 
             default:
@@ -110,7 +113,8 @@ class extractor {
     /**
      * Strip RTF control words and return plain text.
      */
-    private function extract_rtf(string $path): string {
+    private function extractRtf(string $path): string
+    {
         $raw = file_get_contents($path);
         // Remove RTF control words and groups.
         $text = preg_replace('/\\\\[a-z]+\-?[0-9]*[ ]?/', '', $raw);
@@ -127,7 +131,8 @@ class extractor {
      * @param string   $xmlentry Entry path inside the ZIP
      * @param string[] $tags     XML element names whose text content to collect
      */
-    private function extract_zip_xml(string $zippath, string $xmlentry, array $tags): string {
+    private function extractZipXml(string $zippath, string $xmlentry, array $tags): string
+    {
         if (!class_exists('ZipArchive')) {
             throw new \Exception('PHP ZipArchive extension is required to read this file type.');
         }
@@ -144,7 +149,7 @@ class extractor {
             throw new \Exception('Expected entry "' . $xmlentry . '" not found inside the archive.');
         }
 
-        return $this->xml_tags_to_text($xml, $tags);
+        return $this->xmlTagsToText($xml, $tags);
     }
 
     /**
@@ -154,7 +159,8 @@ class extractor {
      * @param string   $pattern  Glob-style pattern (only * wildcard supported)
      * @param string[] $tags     XML element names whose text content to collect
      */
-    private function extract_zip_xml_glob(string $zippath, string $pattern, array $tags): string {
+    private function extractZipXmlGlob(string $zippath, string $pattern, array $tags): string
+    {
         if (!class_exists('ZipArchive')) {
             throw new \Exception('PHP ZipArchive extension is required to read this file type.');
         }
@@ -173,7 +179,7 @@ class extractor {
             if (preg_match($regex, $name)) {
                 $xml = $zip->getFromIndex($i);
                 if ($xml !== false) {
-                    $parts[] = $this->xml_tags_to_text($xml, $tags);
+                    $parts[] = $this->xmlTagsToText($xml, $tags);
                 }
             }
         }
@@ -185,7 +191,8 @@ class extractor {
     /**
      * Parse XML and concatenate text from the given element names.
      */
-    private function xml_tags_to_text(string $xml, array $tags): string {
+    private function xmlTagsToText(string $xml, array $tags): string
+    {
         // Suppress XML warnings for malformed namespace prefixes.
         $dom = new \DOMDocument();
         @$dom->loadXML($xml);
@@ -209,7 +216,8 @@ class extractor {
     /**
      * Extract text from EPUB (ZIP of XHTML files).
      */
-    private function extract_epub(string $path): string {
+    private function extractEpub(string $path): string
+    {
         if (!class_exists('ZipArchive')) {
             throw new \Exception('PHP ZipArchive extension is required to read EPUB files.');
         }
@@ -239,7 +247,8 @@ class extractor {
      * Extract text from a PDF using regex heuristics.
      * Works for most basic PDFs; image-only PDFs will yield empty/partial text.
      */
-    private function extract_pdf(string $path): string {
+    private function extractPdf(string $path): string
+    {
         $raw = file_get_contents($path);
         if ($raw === false) {
             throw new \Exception('Could not read the PDF file.');
@@ -253,14 +262,14 @@ class extractor {
             // Match Tj / TJ / ' / " text-showing operators.
             preg_match_all('/\(([^)]*)\)\s*T[j\'"]/', $block, $tj);
             foreach ($tj[1] as $t) {
-                $text .= $this->decode_pdf_string($t) . ' ';
+                $text .= $this->decodePdfString($t) . ' ';
             }
 
             preg_match_all('/\[(.*?)\]\s*TJ/s', $block, $tjarray);
             foreach ($tjarray[1] as $t) {
                 preg_match_all('/\(([^)]*)\)/', $t, $inner);
                 foreach ($inner[1] as $part) {
-                    $text .= $this->decode_pdf_string($part);
+                    $text .= $this->decodePdfString($part);
                 }
                 $text .= ' ';
             }
@@ -282,7 +291,8 @@ class extractor {
     /**
      * Decode a raw PDF string literal (handle basic escape sequences and octal).
      */
-    private function decode_pdf_string(string $s): string {
+    private function decodePdfString(string $s): string
+    {
         // Handle escape sequences.
         $s = str_replace(['\\n', '\\r', '\\t', '\\\\', '\\(', '\\)'], ["\n", "\r", "\t", '\\', '(', ')'], $s);
         // Handle octal escapes \ddd.

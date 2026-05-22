@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle.
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -42,8 +43,9 @@ require_once($CFG->dirroot . '/course/externallib.php');
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class api {
-    /** @var string[] Non-fatal H5P generation warnings collected during publish_course(). */
+class Api
+{
+    /** @var string[] Non-fatal H5P generation warnings collected during publishCourse(). */
     private $h5pwarnings = [];
 
     /**
@@ -58,7 +60,7 @@ class api {
      * @param string|null $model AI model name or null for first available
      * @return \stdClass Course data
      */
-    public function generate_course_outline(
+    public function generateCourseOutline(
         $topic,
         $level,
         $numsections,
@@ -75,7 +77,7 @@ class api {
         global $USER;
 
         // Build prompt for AI.
-        $prompt = $this->build_generation_prompt(
+        $prompt = $this->buildGenerationPrompt(
             $topic,
             $level,
             $numsections,
@@ -88,11 +90,11 @@ class api {
             $plan
         );
 
-        $this->write_progress(1, 15, 'Building course outline...');
+        $this->writeProgress(1, 15, 'Building course outline...');
 
         // Build grouped list: [{providerid, providername, models:[...]}]
         // Order: requested/default provider first, then other enabled providers.
-        $providers = $this->build_fallback_providers($providerid, $model);
+        $providers = $this->buildFallbackProviders($providerid, $model);
 
         $lasterror   = null;
         $fallbacklog = [];
@@ -104,9 +106,9 @@ class api {
                 for ($retry = 1; $retry <= 3; $retry++) {
                     try {
                         $attemptindex++;
-                        $response = provider::call_api($prompt, $prov['providerid'], $trymodel);
+                        $response = provider::callApi($prompt, $prov['providerid'], $trymodel);
 
-                        $this->write_progress(2, 65, 'AI response received, processing...');
+                        $this->writeProgress(2, 65, 'AI response received, processing...');
 
                         // Strip markdown code fences.
                         $rawresponse = trim($response);
@@ -176,10 +178,9 @@ class api {
                         }
 
                         return $coursedata;
-
                     } catch (\Exception $e) {
                         $lasterror   = $e->getMessage();
-                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $isratelimit = $this->isRateLimitError($lasterror);
                         $fallbacklog[] = [
                             'provider' => $prov['providername'],
                             'model'    => $trymodel ?: '(default)',
@@ -195,14 +196,14 @@ class api {
                     }
                 }
             }
-            // $ratelimited=true → foreach continues to next provider automatically.
+            // $ratelimited=true â†’ foreach continues to next provider automatically.
         }
 
         throw new \Exception('All AI providers exhausted after retries. Last error: ' . $lasterror);
     }
 
     /**
-     * Generate a lightweight course plan — structure only, no lesson content or quiz questions.
+     * Generate a lightweight course plan â€” structure only, no lesson content or quiz questions.
      * Used by paid users (saas_api_key set) before full generation. The plan contains per-section
      * curriculum decisions: which activities make sense and which H5P type fits best.
      *
@@ -218,7 +219,7 @@ class api {
      * @param string|null $customtitle      Custom title override
      * @return \stdClass Plan object {title, summary, sections[]}
      */
-    public function plan_course_outline(
+    public function planCourseOutline(
         $topic,
         $level,
         $numsections,
@@ -249,12 +250,19 @@ class api {
             }
         }
 
-        $prompt = $this->build_plan_prompt(
-            $topic, $level, $numsections, $includequiz, $includeassignment, $includeh5p,
-            $uploadedcontent, $customtitle, $allowedtypes
+        $prompt = $this->buildPlanPrompt(
+            $topic,
+            $level,
+            $numsections,
+            $includequiz,
+            $includeassignment,
+            $includeh5p,
+            $uploadedcontent,
+            $customtitle,
+            $allowedtypes
         );
 
-        $providers  = $this->build_fallback_providers($providerid, $model);
+        $providers  = $this->buildFallbackProviders($providerid, $model);
         $lasterror  = null;
         $fallbacklog = [];
 
@@ -263,7 +271,7 @@ class api {
             foreach ($prov['models'] as $trymodel) {
                 for ($retry = 1; $retry <= 3; $retry++) {
                     try {
-                        $response = provider::call_api($prompt, $prov['providerid'], $trymodel);
+                        $response = provider::callApi($prompt, $prov['providerid'], $trymodel);
 
                         $rawresponse = trim($response);
                         $rawresponse = preg_replace('/^```(?:json)?\s*\n?/i', '', $rawresponse);
@@ -293,10 +301,9 @@ class api {
                         }
 
                         return $plandata;
-
                     } catch (\Exception $e) {
                         $lasterror   = $e->getMessage();
-                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $isratelimit = $this->isRateLimitError($lasterror);
                         $fallbacklog[] = [
                             'provider' => $prov['providername'],
                             'model'    => $trymodel ?: '(default)',
@@ -319,9 +326,16 @@ class api {
     /**
      * Build the lightweight planning prompt.
      */
-    private function build_plan_prompt(
-        $topic, $level, $numsections, $includequiz, $includeassignment, $includeh5p,
-        $uploadedcontent = null, $customtitle = null, $allowedtypes = []
+    private function buildPlanPrompt(
+        $topic,
+        $level,
+        $numsections,
+        $includequiz,
+        $includeassignment,
+        $includeh5p,
+        $uploadedcontent = null,
+        $customtitle = null,
+        $allowedtypes = []
     ) {
         $topicline = !empty($topic) ? "Topic: {$topic}" : 'Topic: (derive from source document)';
         $titleline = !empty($customtitle) ? "Custom title requested: \"{$customtitle}\"" : '';
@@ -374,7 +388,7 @@ class api {
             : '"title": "Descriptive course title"';
 
         $prompt  = "You are an expert curriculum designer.\n";
-        $prompt .= "Plan the structure of a Moodle course. Return JSON ONLY — no markdown, no explanation.\n\n";
+        $prompt .= "Plan the structure of a Moodle course. Return JSON ONLY â€” no markdown, no explanation.\n\n";
         $prompt .= "{$topicline}\n";
         if ($titleline) {
             $prompt .= "{$titleline}\n";
@@ -384,7 +398,7 @@ class api {
         $prompt .= $contextsection;
         $prompt .= "\n\nACTIVITIES ENABLED BY THE TEACHER:\n" . $enabledlist;
         $prompt .= "\nFor EACH section, decide which ENABLED activities make sense given that section's content.\n";
-        $prompt .= "A section doesn't need every enabled activity — use judgment. ";
+        $prompt .= "A section doesn't need every enabled activity â€” use judgment. ";
         $prompt .= "E.g. an intro section may not need an assignment; a vocab-heavy section suits drag-the-words.\n";
         $prompt .= $h5pinstruction;
         $prompt .= "\nDo NOT generate lesson content, quiz questions, or assignment instructions.\n";
@@ -426,8 +440,9 @@ class api {
      * @param string|null $model      Requested model (placed first in its provider's list)
      * @return array
      */
-    private function build_fallback_providers(?int $providerid, ?string $model): array {
-        $allproviders = provider::get_all(true);
+    private function buildFallbackProviders(?int $providerid, ?string $model): array
+    {
+        $allproviders = provider::getAll(true);
         $result       = [];
         $seen         = [];
 
@@ -453,7 +468,7 @@ class api {
                 $addprovider($req, $model);
             }
         } else {
-            $def = provider::get_default();
+            $def = provider::getDefault();
             if ($def) {
                 $addprovider($def, $model);
             }
@@ -472,7 +487,8 @@ class api {
      * @param string $message Error message
      * @return bool
      */
-    private function is_rate_limit_error(string $message): bool {
+    private function isRateLimitError(string $message): bool
+    {
         $patterns = [
             'rate limit', 'rate_limit', 'ratelimit',
             '429', 'too many requests',
@@ -493,7 +509,7 @@ class api {
     /**
      * Build prompt for course generation.
      */
-    private function build_generation_prompt(
+    private function buildGenerationPrompt(
         $topic,
         $level,
         $numsections,
@@ -529,11 +545,11 @@ class api {
 
         $quizcount    = min($maxquiz, 5); // Default 5 questions per section.
         $quizinstruct = $includequiz
-            ? "Yes — generate exactly {$quizcount} MCQ questions per section"
+            ? "Yes â€” generate exactly {$quizcount} MCQ questions per section"
             : 'No';
 
         $prompt  = "You are a senior instructional designer with expertise in creating comprehensive, university-level online courses.\n";
-        $prompt .= "Your task is to create a COMPLETE, DETAILED course — not a brief outline.\n\n";
+        $prompt .= "Your task is to create a COMPLETE, DETAILED course â€” not a brief outline.\n\n";
         $prompt .= "{$topicline}\n";
         $prompt .= "Level: {$level}\n";
         $prompt .= "Number of Sections: {$numsections} (maximum {$maxsections})\n";
@@ -541,9 +557,9 @@ class api {
         $prompt .= "Include Assignments: " . ($includeassignment ? 'Yes' : 'No') . "\n";
         $prompt .= $contextsection;
 
-        // Approved course plan — AI must follow this structure exactly.
+        // Approved course plan â€” AI must follow this structure exactly.
         if (!empty($plan) && !empty($plan->sections)) {
-            $prompt .= "\n\n== APPROVED COURSE PLAN — FOLLOW THIS STRUCTURE EXACTLY ==\n";
+            $prompt .= "\n\n== APPROVED COURSE PLAN â€” FOLLOW THIS STRUCTURE EXACTLY ==\n";
             $prompt .= "The teacher has approved the following plan. ";
             $prompt .= "Use the EXACT section names and generate content for ONLY the activities listed per section.\n\n";
             foreach ($plan->sections as $si => $plansec) {
@@ -577,14 +593,14 @@ class api {
         $prompt .= "The content_html field MUST contain well-structured HTML with ";
         $prompt .= "<h2>, <h3>, <p>, <ul>, <ol>, <strong>, <em>, <blockquote>, ";
         $prompt .= "and <pre><code> tags as appropriate.\n";
-        $prompt .= "Each lesson MUST be at minimum 800 words — comprehensive enough for a student to learn the topic without any other resources.\n\n";
+        $prompt .= "Each lesson MUST be at minimum 800 words â€” comprehensive enough for a student to learn the topic without any other resources.\n\n";
 
         // Emoji styling instructions.
         if ($useemojis) {
             $prompt .= "== EMOJI ENHANCEMENTS ==\n";
             $prompt .= "Sprinkle relevant emojis throughout the content to make it engaging and visually appealing.\n";
             $prompt .= "Use emojis in headings, bullet points, and key concepts where appropriate.\n";
-            $prompt .= "Examples: 📚 for learning, 💡 for tips, 🎯 for objectives, ⚠️ for warnings, ✅ for checklists, 🔍 for examples.\n\n";
+            $prompt .= "Examples: ðŸ“š for learning, ðŸ’¡ for tips, ðŸŽ¯ for objectives, âš ï¸ for warnings, âœ… for checklists, ðŸ” for examples.\n\n";
         }
 
         // SVG diagram instructions.
@@ -614,17 +630,17 @@ class api {
 
         $prompt .= "== CRITICAL SECTION COUNT REQUIREMENT ==\n";
         $prompt .= "You MUST generate EXACTLY {$numsections} sections.\n";
-        $prompt .= "The 'sections' array in your JSON response MUST contain precisely {$numsections} section objects — no more, no less.\n";
+        $prompt .= "The 'sections' array in your JSON response MUST contain precisely {$numsections} section objects â€” no more, no less.\n";
         $prompt .= "Do not stop early. Do not return fewer sections than requested.\n\n";
 
-        $prompt .= "Return ONLY a valid JSON object — no markdown fences, no extra text before or after.\n";
+        $prompt .= "Return ONLY a valid JSON object â€” no markdown fences, no extra text before or after.\n";
         $prompt .= "Use this EXACT JSON structure (repeat the section template exactly {$numsections} times):\n";
         $prompt .= "{\n";
         $prompt .= "  {$titleinstruction},\n";
         $prompt .= '  "summary": "A rich 2-3 sentence course description explaining what students will learn and why it matters",' . "\n";
         $prompt .= '  "sections": [' . "\n";
         $prompt .= "    {\n";
-        $prompt .= '      "name": "Clear descriptive title — do NOT start with Section N: or any numbering",' . "\n";
+        $prompt .= '      "name": "Clear descriptive title â€” do NOT start with Section N: or any numbering",' . "\n";
         $prompt .= '      "description": "2-3 sentence section overview",' . "\n";
         $prompt .= "      \"lesson\": {\n";
         $prompt .= '        "summary": "1-2 sentence lesson intro shown to students before they open the lesson",' . "\n";
@@ -660,12 +676,12 @@ class api {
 
         $prompt .= "\n    }\n  ]\n}";
 
-        $prompt .= "\n\nREMEMBER: Every lesson content_html must be thorough — at least 800 words of educational content.";
+        $prompt .= "\n\nREMEMBER: Every lesson content_html must be thorough â€” at least 800 words of educational content.";
         $prompt .= " Every quiz must have exactly {$quizcount} MCQ questions if quizzes are enabled.";
         if ($includeassignment) {
             $prompt .= " Every section must include a complete assignment with title, description, and step-by-step instructions.";
         }
-        $prompt .= " Return valid JSON only — no surrounding markdown.";
+        $prompt .= " Return valid JSON only â€” no surrounding markdown.";
 
         return $prompt;
     }
@@ -676,7 +692,8 @@ class api {
      * @param \stdClass $coursedata Course data
      * @return array{courseid: int, h5p_warnings: string[]}
      */
-    public function publish_course($coursedata) {
+    public function publishCourse($coursedata)
+    {
         global $DB, $USER;
 
         // Validate course data.
@@ -711,7 +728,7 @@ class api {
         $course   = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
 
         // Create ALL required sections upfront (Moodle 4.0+ no longer uses
-        // the numsections courseformatoption — sections must be created explicitly).
+        // the numsections courseformatoption â€” sections must be created explicitly).
         \course_create_sections_if_missing($course, range(0, $numsections));
 
         // Populate sections and add modules.
@@ -736,26 +753,26 @@ class api {
 
             // Create lesson page.
             if (!empty($section->lesson)) {
-                $this->create_lesson_page($course, $sectionnum, $section);
+                $this->createLessonPage($course, $sectionnum, $section);
             }
 
-            // Create quiz — respect plan decision if present.
+            // Create quiz â€” respect plan decision if present.
             $doquiz = isset($section->quiz_planned)
                 ? (bool) $section->quiz_planned
                 : (!empty($section->quiz) && !empty($section->quiz->questions));
             if ($doquiz && !empty($section->quiz) && !empty($section->quiz->questions)) {
-                $this->create_quiz($course, $sectionnum, $section);
+                $this->createQuiz($course, $sectionnum, $section);
             }
 
-            // Create assignment — respect plan decision if present.
+            // Create assignment â€” respect plan decision if present.
             $doassignment = isset($section->assignment_planned)
                 ? (bool) $section->assignment_planned
                 : !empty($section->assignment);
             if ($doassignment && !empty($section->assignment)) {
                 debugging('Course Agent: Creating assignment for section ' . $sectionnum .
                           ' data: ' . json_encode($section->assignment), DEBUG_DEVELOPER);
-                $this->create_assignment($course, $sectionnum, $section->assignment);
-            } else if (!$doassignment) {
+                $this->createAssignment($course, $sectionnum, $section->assignment);
+            } elseif (!$doassignment) {
                 debugging('Course Agent: Assignment skipped for section ' . $sectionnum . ' (plan decision)', DEBUG_DEVELOPER);
             } else {
                 debugging('Course Agent: No assignment data for section ' . $sectionnum .
@@ -787,7 +804,7 @@ class api {
                             $allowedtypes = $parsed;
                         }
                     }
-                    $this->create_h5p_activities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes);
+                    $this->createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes);
                 }
             }
         }
@@ -810,14 +827,15 @@ class api {
 
     /**
      * Create a stub course_modules row so we have a cmid BEFORE calling
-     * {module}_add_instance() — Moodle's own module libs (e.g. page_add_instance)
+     * {module}_add_instance() â€” Moodle's own module libs (e.g. page_add_instance)
      * expect $data->coursemodule to already exist and update it themselves.
      *
      * @param  stdClass $course
      * @param  string   $modulename  e.g. 'page', 'quiz', 'assign'
      * @return int      The new course_modules.id (cmid)
      */
-    private function create_cm_stub($course, $modulename) {
+    private function createCmStub($course, $modulename)
+    {
         global $DB;
 
         $moduleid = $DB->get_field('modules', 'id', ['name' => $modulename], MUST_EXIST);
@@ -841,21 +859,23 @@ class api {
     /**
      * Move a cm to its target section after _add_instance() has set the instance id.
      */
-    private function place_cm_in_section($course, $cmid, $sectionnum) {
+    private function placeCmInSection($course, $cmid, $sectionnum)
+    {
         \course_add_cm_to_section($course, $cmid, $sectionnum);
     }
 
     /**
      * Create a lesson page (mod_page).
      */
-    private function create_lesson_page($course, $sectionnum, $section) {
+    private function createLessonPage($course, $sectionnum, $section)
+    {
         global $CFG;
         require_once($CFG->dirroot . '/mod/page/lib.php');
         require_once($CFG->dirroot . '/lib/resourcelib.php');
 
-        // Must create the CM stub first — page_add_instance() uses $data->coursemodule
+        // Must create the CM stub first â€” page_add_instance() uses $data->coursemodule
         // to update course_modules.instance after inserting into mdl_page.
-        $cmid = $this->create_cm_stub($course, 'page');
+        $cmid = $this->createCmStub($course, 'page');
 
         $content = !empty($section->lesson->content_html) ? $section->lesson->content_html : '';
         if (!empty($section->lesson->key_points) && is_array($section->lesson->key_points)) {
@@ -881,20 +901,21 @@ class api {
         $moduleinfo->timemodified     = time();
 
         \page_add_instance($moduleinfo, null);
-        $this->place_cm_in_section($course, $cmid, $sectionnum);
+        $this->placeCmInSection($course, $cmid, $sectionnum);
     }
 
     /**
      * Create a quiz (mod_quiz) and populate it with AI-generated MCQ questions.
      */
-    private function create_quiz($course, $sectionnum, $section) {
+    private function createQuiz($course, $sectionnum, $section)
+    {
         global $CFG, $DB;
         require_once($CFG->dirroot . '/mod/quiz/lib.php');
         require_once($CFG->dirroot . '/lib/questionlib.php');
         require_once($CFG->dirroot . '/question/engine/lib.php');
         require_once($CFG->dirroot . '/question/type/multichoice/questiontype.php');
 
-        $cmid = $this->create_cm_stub($course, 'quiz');
+        $cmid = $this->createCmStub($course, 'quiz');
 
         $questions    = $section->quiz->questions ?? [];
         $numquestions = count($questions);
@@ -947,13 +968,13 @@ class api {
         $moduleinfo->reviewoverallfeedback      = 0x11110;
 
         $quizid = \quiz_add_instance($moduleinfo, null);
-        $this->place_cm_in_section($course, $cmid, $sectionnum);
+        $this->placeCmInSection($course, $cmid, $sectionnum);
 
-        // ── Add AI-generated MCQ questions to the quiz ─────────────────────
+        // â”€â”€ Add AI-generated MCQ questions to the quiz â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (!empty($questions)) {
             // Get or create the course question category.
             $coursecontext = \context_course::instance($course->id);
-            $categoryid    = $this->get_or_create_question_category($coursecontext, $course->fullname);
+            $categoryid    = $this->getOrCreateQuestionCategory($coursecontext, $course->fullname);
 
             $slot = 1;
             foreach ($questions as $q) {
@@ -961,7 +982,7 @@ class api {
                     continue; // Skip malformed questions.
                 }
 
-                $questionid = $this->create_multichoice_question(
+                $questionid = $this->createMultichoiceQuestion(
                     $categoryid,
                     $q,
                     $coursecontext
@@ -983,7 +1004,8 @@ class api {
     /**
      * Get or create the default question category for a course context.
      */
-    private function get_or_create_question_category($context, $coursename) {
+    private function getOrCreateQuestionCategory($context, $coursename)
+    {
         global $DB;
 
         $existing = $DB->get_record('question_categories', [
@@ -1014,7 +1036,8 @@ class api {
      * @param  context   $context
      * @return int|false  Question ID or false on failure
      */
-    private function create_multichoice_question($categoryid, $q, $context) {
+    private function createMultichoiceQuestion($categoryid, $q, $context)
+    {
         global $DB, $USER;
 
         $options   = array_values((array) $q->options);
@@ -1024,14 +1047,14 @@ class api {
         $explanation = !empty($q->explanation) ? (string) $q->explanation : '';
 
         try {
-            // ── question_bank_entries (Moodle 5.x requirement) ───────────────
+            // â”€â”€ question_bank_entries (Moodle 5.x requirement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             $questionbankentry = new \stdClass();
             $questionbankentry->questioncategoryid = $categoryid;
             $questionbankentry->idnumber = null;
             $questionbankentry->ownerid = $USER->id ?? 0;
             $bankentryid = $DB->insert_record('question_bank_entries', $questionbankentry);
 
-            // ── question base record ────────────────────────────────────────
+            // â”€â”€ question base record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             $question              = new \stdClass();
             $question->category   = $categoryid;
             $question->qtype      = 'multichoice';
@@ -1053,7 +1076,7 @@ class api {
 
             $questionid = $DB->insert_record('question', $question);
 
-            // ── question_versions (Moodle 5.x requirement) ───────────────────
+            // â”€â”€ question_versions (Moodle 5.x requirement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             $questionversion = new \stdClass();
             $questionversion->questionbankentryid = $bankentryid;
             $questionversion->questionid = $questionid;
@@ -1061,7 +1084,7 @@ class api {
             $questionversion->status = 'ready';
             $DB->insert_record('question_versions', $questionversion);
 
-            // ── qtype_multichoice_options ────────────────────────────────────
+            // â”€â”€ qtype_multichoice_options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             $mcoptions                      = new \stdClass();
             $mcoptions->questionid          = $questionid;
             $mcoptions->layout              = 0; // Vertical.
@@ -1077,7 +1100,7 @@ class api {
             $mcoptions->shownumcorrect      = 0;
             $DB->insert_record('qtype_multichoice_options', $mcoptions);
 
-            // ── question_answers (one per option) ───────────────────────────
+            // â”€â”€ question_answers (one per option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             foreach ($options as $i => $opttext) {
                 $answer                  = new \stdClass();
                 $answer->question        = $questionid;
@@ -1102,11 +1125,12 @@ class api {
     /**
      * Create an assignment (mod_assign).
      */
-    private function create_assignment($course, $sectionnum, $assignmentdata) {
+    private function createAssignment($course, $sectionnum, $assignmentdata)
+    {
         global $CFG, $DB;
         require_once($CFG->dirroot . '/mod/assign/lib.php');
 
-        $cmid = $this->create_cm_stub($course, 'assign');
+        $cmid = $this->createCmStub($course, 'assign');
 
         // Debug log the incoming assignment data.
         debugging('Course Agent: Creating assignment in section ' . $sectionnum .
@@ -1174,7 +1198,7 @@ class api {
             // Without this, the CM has instance=0 and the assignment is invisible.
             $DB->set_field('course_modules', 'instance', $instanceid, ['id' => $cmid]);
 
-            $this->place_cm_in_section($course, $cmid, $sectionnum);
+            $this->placeCmInSection($course, $cmid, $sectionnum);
         } catch (\Exception $e) {
             debugging('Course Agent: Failed to create assignment in section ' . $sectionnum .
                       ': ' . $e->getMessage());
@@ -1193,7 +1217,8 @@ class api {
      * @param string    $saaskey    SaaS API key
      * @param string    $saasurl    SaaS base URL (no trailing slash)
      */
-    private function create_h5p_activities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes = []) {
+    private function createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes = [])
+    {
         $content = strip_tags($section->lesson->content_html ?? $section->description ?? '');
         if (empty(trim($content))) {
             return;
@@ -1213,7 +1238,7 @@ class api {
         if (!empty($section->h5p_type) && in_array($section->h5p_type, $allowedtypes, true)) {
             $activitytype = $section->h5p_type;
         } else {
-            // AI type missing or not in allowed list — rotate through allowed types.
+            // AI type missing or not in allowed list â€” rotate through allowed types.
             $activitytype = $allowedtypes[($sectionnum - 1) % count($allowedtypes)];
         }
 
@@ -1277,12 +1302,12 @@ class api {
             return;
         }
 
-        $h5ppath = $this->build_h5p_package($h5pparams, $activitytype);
+        $h5ppath = $this->buildH5pPackage($h5pparams, $activitytype);
         if (!$h5ppath) {
             return;
         }
 
-        $this->create_h5p_module($course, $sectionnum, $section->name ?? ('Section ' . $sectionnum), $h5ppath);
+        $this->createH5pModule($course, $sectionnum, $section->name ?? ('Section ' . $sectionnum), $h5ppath);
 
         // Clean up temp file.
         @unlink($h5ppath);
@@ -1295,7 +1320,8 @@ class api {
      * @param string    $activitytype One of: single_choice_set, summary, drag_the_words
      * @return string|false Absolute path to the .h5p ZIP, or false on failure
      */
-    private function build_h5p_package($h5pparams, $activitytype) {
+    private function buildH5pPackage($h5pparams, $activitytype)
+    {
         $librarymap = [
             'single_choice_set' => ['machineName' => 'H5P.SingleChoiceSet', 'majorVersion' => 1, 'minorVersion' => 11],
             'summary'           => ['machineName' => 'H5P.Summary',          'majorVersion' => 1, 'minorVersion' => 10],
@@ -1307,7 +1333,7 @@ class api {
             'dialog_cards'       => ['machineName' => 'H5P.Dialogcards',     'majorVersion' => 1, 'minorVersion' => 9],
             'essay'              => ['machineName' => 'H5P.Essay',           'majorVersion' => 1, 'minorVersion' => 5],
             'mark_the_words'     => ['machineName' => 'H5P.MarkTheWords',    'majorVersion' => 1, 'minorVersion' => 9],
-            'sort_the_paragraphs'=> ['machineName' => 'H5P.SortParagraphs', 'majorVersion' => 0, 'minorVersion' => 11],
+            'sort_the_paragraphs' => ['machineName' => 'H5P.SortParagraphs', 'majorVersion' => 0, 'minorVersion' => 11],
             'crossword'          => ['machineName' => 'H5P.Crossword',       'majorVersion' => 0, 'minorVersion' => 5],
             'find_the_words'     => ['machineName' => 'H5P.FindTheWords',    'majorVersion' => 1, 'minorVersion' => 4],
             'accordion'          => ['machineName' => 'H5P.Accordion',       'majorVersion' => 1, 'minorVersion' => 0],
@@ -1365,7 +1391,8 @@ class api {
      * @param string    $activityname Name prefix for the module
      * @param string    $h5ppath     Absolute path to the .h5p ZIP file
      */
-    private function create_h5p_module($course, $sectionnum, $activityname, $h5ppath) {
+    private function createH5pModule($course, $sectionnum, $activityname, $h5ppath)
+    {
         global $DB;
 
         if (!$DB->record_exists('modules', ['name' => 'h5pactivity'])) {
@@ -1373,12 +1400,12 @@ class api {
             return;
         }
 
-        $cmid = $this->create_cm_stub($course, 'h5pactivity');
+        $cmid = $this->createCmStub($course, 'h5pactivity');
 
         // Insert h5pactivity record directly (avoids file_manager draft dependency).
         $record                  = new \stdClass();
         $record->course          = $course->id;
-        $record->name            = $activityname . ' — H5P Activity';
+        $record->name            = $activityname . ' â€” H5P Activity';
         $record->timecreated     = time();
         $record->timemodified    = time();
         $record->intro           = '';
@@ -1406,7 +1433,7 @@ class api {
         ];
         $fs->create_file_from_pathname($filerecord, $h5ppath);
 
-        $this->place_cm_in_section($course, $cmid, $sectionnum);
+        $this->placeCmInSection($course, $cmid, $sectionnum);
     }
 
     /**
@@ -1416,7 +1443,8 @@ class api {
      * @param int    $percent Progress percentage 0-100
      * @param string $message Status message
      */
-    private function write_progress($step, $percent, $message) {
+    private function writeProgress($step, $percent, $message)
+    {
         global $USER;
         $dir = make_temp_directory('courseagent');
         $file = $dir . '/progress_' . $USER->id . '.json';
@@ -1439,7 +1467,8 @@ class api {
      * @param string $userprompt User's edit request
      * @return stdClass Result with coursedata and message
      */
-    public function edit_item($coursedata, $targettype, $targetindex, $questionindex, $userprompt) {
+    public function editItem($coursedata, $targettype, $targetindex, $questionindex, $userprompt)
+    {
         $sections = $coursedata->sections ?? [];
         if (!isset($sections[$targetindex])) {
             throw new \Exception('Section not found at index ' . $targetindex);
@@ -1479,14 +1508,14 @@ class api {
         }
 
         // Build context for AI.
-        $prompt = $this->build_edit_prompt($itemtype, $section, $targetitem, $questionindex, $userprompt);
+        $prompt = $this->buildEditPrompt($itemtype, $section, $targetitem, $questionindex, $userprompt);
 
         // System prompt for strict JSON output.
         $systemprompt = "You are a JSON generator. Return ONLY valid JSON - no markdown code blocks, no explanations, no conversational text. " .
             "The JSON must match the exact structure expected. Start with { and end with }.";
 
-        // Triple-nested fallback: provider → model → 3 retries. Mirrors generate_course_outline().
-        $providers   = $this->build_fallback_providers(null, null);
+        // Triple-nested fallback: provider â†’ model â†’ 3 retries. Mirrors generateCourseOutline().
+        $providers   = $this->buildFallbackProviders(null, null);
         $lasterror   = null;
         $fallbacklog = [];
         $response    = null;
@@ -1498,13 +1527,13 @@ class api {
             foreach ($prov['models'] as $trymodel) {
                 for ($retry = 1; $retry <= 3; $retry++) {
                     try {
-                        $response  = provider::call_api($prompt, $prov['providerid'], $trymodel, $systemprompt);
+                        $response  = provider::callApi($prompt, $prov['providerid'], $trymodel, $systemprompt);
                         $usedprov  = $prov['providername'];
                         $usedmodel = $trymodel;
                         break 3;
                     } catch (\Throwable $e) {
                         $lasterror   = $e->getMessage();
-                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $isratelimit = $this->isRateLimitError($lasterror);
                         $fallbacklog[] = [
                             'provider' => $prov['providername'],
                             'model'    => $trymodel ?: '(default)',
@@ -1553,17 +1582,17 @@ class api {
         }
 
         // Merge updated item back into course.
-        $this->merge_edited_item($coursedata, $targettype, $targetindex, $questionindex, $updateditem);
+        $this->mergeEditedItem($coursedata, $targettype, $targetindex, $questionindex, $updateditem);
 
         // Build descriptive message based on what was changed.
         $itemcount = 0;
         if ($itemtype === 'quiz') {
             $itemcount = count($updateditem->questions ?? []);
-        } else if ($itemtype === 'question') {
+        } elseif ($itemtype === 'question') {
             $itemcount = 1;
-        } else if ($itemtype === 'lesson') {
+        } elseif ($itemtype === 'lesson') {
             $itemcount = !empty($updateditem->title) ? 1 : 0;
-        } else if ($itemtype === 'assignment') {
+        } elseif ($itemtype === 'assignment') {
             $itemcount = !empty($updateditem->title) ? 1 : 0;
         }
         $messagetext = "Updated {$itemtype} in section " . ($targetindex + 1);
@@ -1583,7 +1612,8 @@ class api {
     /**
      * Build prompt for targeted edit.
      */
-    private function build_edit_prompt($itemtype, $section, $targetitem, $questionindex, $userprompt) {
+    private function buildEditPrompt($itemtype, $section, $targetitem, $questionindex, $userprompt)
+    {
         $sectionname = $section->name ?? 'Section ' . ($section->index ?? 0);
 
         if ($itemtype === 'question') {
@@ -1605,7 +1635,7 @@ class api {
             $prompt .= "\nUser Request: {$userprompt}\n\n";
             $prompt .= "Return ONLY the updated question as JSON with fields: question, options (array), correct_answer (0-3), explanation. ";
             $prompt .= "Keep all other options unchanged unless specifically requested.";
-        } else if ($itemtype === 'quiz') {
+        } elseif ($itemtype === 'quiz') {
             $quiz = $targetitem;
             $prompt = "You are an expert instructional designer.\n";
             $prompt .= "Edit the following quiz based on the user's request.\n\n";
@@ -1631,7 +1661,7 @@ class api {
             $prompt .= "Preserve all existing questions unless the user explicitly asks to add/remove/replace specific ones. ";
             $prompt .= "If adding questions, add them to the questions array. ";
             $prompt .= "If removing, omit them from the array.";
-        } else if ($itemtype === 'lesson') {
+        } elseif ($itemtype === 'lesson') {
             $lesson = $targetitem;
             $prompt = "You are an expert instructional designer.\n";
             $prompt .= "Edit the following lesson content based on the user's request.\n\n";
@@ -1647,7 +1677,7 @@ class api {
             $prompt .= "\nUser Request: {$userprompt}\n\n";
             $prompt .= "Return ONLY the updated lesson as JSON with fields: title, summary, content_html. ";
             $prompt .= "Keep content_html as HTML with proper <h2>, <p>, <ul>, etc. tags.";
-        } else if ($itemtype === 'assignment') {
+        } elseif ($itemtype === 'assignment') {
             $a = $targetitem;
             $prompt = "You are an expert instructional designer.\n";
             $prompt .= "Edit the following assignment based on the user's request.\n";
@@ -1679,7 +1709,8 @@ class api {
     /**
      * Merge edited item back into course data.
      */
-    private function merge_edited_item($coursedata, $targettype, $targetindex, $questionindex, $updateditem) {
+    private function mergeEditedItem($coursedata, $targettype, $targetindex, $questionindex, $updateditem)
+    {
         $section = $coursedata->sections[$targetindex];
 
         switch ($targettype) {
@@ -1700,23 +1731,24 @@ class api {
     }
 
     /**
-     * Full course AI assist — NLP-direct, conversation-aware.
+     * Full course AI assist â€” NLP-direct, conversation-aware.
      * Single AI call determines intent + generates content. No separate intent detection.
      *
      * @param stdClass $coursedata Course data object
      * @param string $userprompt User's request
      * @return stdClass Result with coursedata, delta, message, response_type
      */
-    public function ai_assist($coursedata, $userprompt) {
+    public function aiAssist($coursedata, $userprompt)
+    {
         global $SESSION;
 
         $history = $SESSION->courseagent_chat_history ?? [];
 
         // Pre-load the relevant section content based on section reference in text.
         $sectioncount    = count($coursedata->sections ?? []);
-        $mentionedsecidx = $this->detect_section_reference($userprompt, $sectioncount);
-        $userturn        = $this->build_context_prompt($coursedata, $userprompt, $mentionedsecidx);
-        $systemprompt    = $this->get_assistant_system_prompt();
+        $mentionedsecidx = $this->detectSectionReference($userprompt, $sectioncount);
+        $userturn        = $this->buildContextPrompt($coursedata, $userprompt, $mentionedsecidx);
+        $systemprompt    = $this->getAssistantSystemPrompt();
 
         // Flatten history for API call.
         $historymessages = array_map(
@@ -1724,8 +1756,8 @@ class api {
             array_slice($history, -10)
         );
 
-        // Triple-nested fallback: provider → model → 3 retries. Mirrors generate_course_outline().
-        $providers   = $this->build_fallback_providers(null, null);
+        // Triple-nested fallback: provider â†’ model â†’ 3 retries. Mirrors generateCourseOutline().
+        $providers   = $this->buildFallbackProviders(null, null);
         $lasterror   = null;
         $fallbacklog = [];
         $rawresponse = null;
@@ -1737,7 +1769,7 @@ class api {
             foreach ($prov['models'] as $trymodel) {
                 for ($retry = 1; $retry <= 3; $retry++) {
                     try {
-                        $rawresponse = provider::call_api_with_history(
+                        $rawresponse = provider::callApi_with_history(
                             $historymessages,
                             $userturn,
                             $systemprompt,
@@ -1749,7 +1781,7 @@ class api {
                         break 3;
                     } catch (\Throwable $e) {
                         $lasterror   = $e->getMessage();
-                        $isratelimit = $this->is_rate_limit_error($lasterror);
+                        $isratelimit = $this->isRateLimitError($lasterror);
                         $fallbacklog[] = [
                             'provider' => $prov['providername'],
                             'model'    => $trymodel ?: '(default)',
@@ -1779,7 +1811,7 @@ class api {
             ];
         }
 
-        $result = $this->parse_json_response($rawresponse);
+        $result = $this->parseJsonResponse($rawresponse);
 
         // Persist this turn to session history.
         $history[] = ['role' => 'user',      'content' => $userprompt,         'ts' => time()];
@@ -1809,7 +1841,7 @@ class api {
             }
         }
 
-        // question or plan — no course changes yet.
+        // question or plan â€” no course changes yet.
         // delete ops legitimately have data=null; don't block them.
         if ($rtype !== 'delta' || ($result->op !== 'delete' && empty($result->data))) {
             return (object) [
@@ -1835,11 +1867,11 @@ class api {
 
         debugging('Course Agent AI assist: intent from AI response ' . json_encode($intent), DEBUG_DEVELOPER);
 
-        // Handle delete — no AI data needed.
+        // Handle delete â€” no AI data needed.
         if ($intent->action === 'delete') {
-            $updated = $this->merge_delta($coursedata, $intent, null);
+            $updated = $this->mergeDelta($coursedata, $intent, null);
         } else {
-            $updated = $this->merge_delta($coursedata, $intent, $result->data);
+            $updated = $this->mergeDelta($coursedata, $intent, $result->data);
         }
 
         $updated->sections = array_values((array)$updated->sections);
@@ -1858,7 +1890,7 @@ class api {
         return (object) [
             'coursedata'    => $updated,
             'delta'         => $deltaobj,
-            'message'       => $result->message ?? $this->build_success_message($intent),
+            'message'       => $result->message ?? $this->buildSuccessMessage($intent),
             'response_type' => 'delta',
             'fallback_log'  => $fallbacklog,
             'used_provider' => $usedprov,
@@ -1874,7 +1906,8 @@ class api {
      * @param int $total Total number of sections
      * @return int|null
      */
-    private function detect_section_reference(string $text, int $total): ?int {
+    private function detectSectionReference(string $text, int $total): ?int
+    {
         if (preg_match('/\bsections?\s+(\d+)\b/i', $text, $m)) {
             $idx = (int)$m[1] - 1;
             if ($idx >= 0 && $idx < $total) {
@@ -1900,7 +1933,8 @@ class api {
      * @param int|null $targetsectionidx 0-based index of section to include in full, or null
      * @return string
      */
-    private function build_context_prompt($coursedata, $userprompt, ?int $targetsectionidx): string {
+    private function buildContextPrompt($coursedata, $userprompt, ?int $targetsectionidx): string
+    {
         $sections = $coursedata->sections ?? [];
         $total    = count($sections);
 
@@ -1917,12 +1951,12 @@ class api {
         }
         $prompt .= "\n";
 
-        // Include full content of mentioned section(s) or all sections if ≤4.
+        // Include full content of mentioned section(s) or all sections if â‰¤4.
         if ($targetsectionidx !== null) {
-            $prompt .= $this->format_section_full($sections[$targetsectionidx], $targetsectionidx);
-        } else if ($total <= 4) {
+            $prompt .= $this->formatSectionFull($sections[$targetsectionidx], $targetsectionidx);
+        } elseif ($total <= 4) {
             foreach ($sections as $i => $s) {
-                $prompt .= $this->format_section_full($s, $i);
+                $prompt .= $this->formatSectionFull($s, $i);
             }
         }
 
@@ -1935,9 +1969,10 @@ class api {
     /**
      * Format a single section's full content for the AI prompt.
      */
-    private function format_section_full($section, int $idx): string {
+    private function formatSectionFull($section, int $idx): string
+    {
         $num = $idx + 1;
-        $out = "=== FULL CONTENT: SECTION {$num} — \"" . ($section->name ?? 'Untitled') . "\" ===\n";
+        $out = "=== FULL CONTENT: SECTION {$num} â€” \"" . ($section->name ?? 'Untitled') . "\" ===\n";
 
         if (!empty($section->lesson)) {
             $out .= "LESSON:\n";
@@ -1985,11 +2020,12 @@ class api {
      * Static system prompt for the conversational assistant.
      * Tells AI the response schema + exact JSON schemas per target type.
      */
-    private function get_assistant_system_prompt(): string {
+    private function getAssistantSystemPrompt(): string
+    {
         return <<<'SYSTEMPROMPT'
 You are an AI assistant for editing Moodle LMS courses. You receive a course structure, optional full section content, conversation history, and the user's request.
 
-ALWAYS respond with ONLY a valid JSON object — no markdown fences, no extra text:
+ALWAYS respond with ONLY a valid JSON object â€” no markdown fences, no extra text:
 {
   "type": "question|plan|delta",
   "message": "What you say to the user (friendly, concise)",
@@ -2004,15 +2040,15 @@ ALWAYS respond with ONLY a valid JSON object — no markdown fences, no extra te
 
 RULES:
 - type=question: Request is ambiguous or missing required info. Ask ONE focused question. Set data=null.
-- type=plan: You have ALL information needed to act, but change is large/risky (rewrite full lesson, delete a section). State exactly what you will do in message. Set plan_summary to one sentence summary. Set data=null. NEVER ask the user questions inside a plan message — if you need more info first, use type=question instead.
+- type=plan: You have ALL information needed to act, but change is large/risky (rewrite full lesson, delete a section). State exactly what you will do in message. Set plan_summary to one sentence summary. Set data=null. NEVER ask the user questions inside a plan message â€” if you need more info first, use type=question instead.
 - type=delta: Change is clear and specific, OR user said "yes"/"confirm"/"proceed" after a plan. Include data.
 - section_index is ALWAYS 0-based (section 1 = index 0, section 2 = index 1, etc.).
-- Parse section references from user text ("section 2", "the second section") — override any assumed default.
+- Parse section references from user text ("section 2", "the second section") â€” override any assumed default.
 - question_index is 0-based. Only set for target_type=question.
 - op values: add | update | delete | replace
-- insert_before: for op=add, target=section ONLY — 0-based index to insert the new section BEFORE that position. null means append at end. Example: "add before section 2" → insert_before=1.
+- insert_before: for op=add, target=section ONLY â€” 0-based index to insert the new section BEFORE that position. null means append at end. Example: "add before section 2" â†’ insert_before=1.
 
-EXACT DATA SCHEMAS — data field must match these exactly:
+EXACT DATA SCHEMAS â€” data field must match these exactly:
 
 target_type=lesson:
 {"title":"","summary":"","content_html":"<h2>...</h2><p>...</p>"}
@@ -2030,10 +2066,10 @@ target_type=section (complete new section):
 {"name":"","description":"","lesson":{"title":"","summary":"","content_html":""},"quiz":{"name":"Quiz","questions":[...]},"assignment":{"title":"","description":"","instructions":[],"word_count":500}}
 
 IMPORTANT: For "add N more questions" requests: set target_type=quiz, op=update, and include ALL existing questions PLUS the N new ones in data.questions. Never lose existing questions.
-IMPORTANT: For op=delete, always set data=null — never include section/activity content in data.
+IMPORTANT: For op=delete, always set data=null â€” never include section/activity content in data.
 IMPORTANT: Never combine asking questions with type=plan. If you lack any required detail (title, description, word count, etc.), always use type=question to gather it first, then use type=plan or type=delta once you have what you need.
-MANDATORY DELETE RULE: For ANY delete operation, ALWAYS use type=plan first — even if the request is perfectly clear. In message, describe exactly what will be removed and ask the user to confirm. Only use type=delta with op=delete when the user's CURRENT message is an explicit confirmation ("yes", "proceed", "confirm", "go ahead", "do it") of a delete you described in your immediately previous response.
-IMPORTANT: For assignment content — NEVER reference external files, datasets, CSVs, PDFs, or downloadable resources that students would need. All assignment tasks must be completable using only the student's own knowledge and publicly available information.
+MANDATORY DELETE RULE: For ANY delete operation, ALWAYS use type=plan first â€” even if the request is perfectly clear. In message, describe exactly what will be removed and ask the user to confirm. Only use type=delta with op=delete when the user's CURRENT message is an explicit confirmation ("yes", "proceed", "confirm", "go ahead", "do it") of a delete you described in your immediately previous response.
+IMPORTANT: For assignment content â€” NEVER reference external files, datasets, CSVs, PDFs, or downloadable resources that students would need. All assignment tasks must be completable using only the student's own knowledge and publicly available information.
 SYSTEMPROMPT;
     }
 
@@ -2041,7 +2077,8 @@ SYSTEMPROMPT;
      * Extract the first balanced JSON object from a string using brace counting.
      * Avoids regex confusion caused by inner markdown fences inside content_html.
      */
-    private function extract_json_object(string $text): string {
+    private function extractJsonObject(string $text): string
+    {
         $start = strpos($text, '{');
         if ($start === false) {
             return $text;
@@ -2067,7 +2104,7 @@ SYSTEMPROMPT;
             if (!$instr) {
                 if ($c === '{') {
                     $depth++;
-                } else if ($c === '}' && --$depth === 0) {
+                } elseif ($c === '}' && --$depth === 0) {
                     return substr($text, $start, $i - $start + 1);
                 }
             }
@@ -2077,9 +2114,10 @@ SYSTEMPROMPT;
 
     /**
      * Escape bare control characters inside JSON string values.
-     * Character-by-character walk — immune to PCRE backtrack limits.
+     * Character-by-character walk â€” immune to PCRE backtrack limits.
      */
-    private function sanitize_json_strings(string $json): string {
+    private function sanitizeJsonStrings(string $json): string
+    {
         $out   = '';
         $len   = strlen($json);
         $instr = false;
@@ -2103,10 +2141,22 @@ SYSTEMPROMPT;
                 continue;
             }
             if ($instr) {
-                if ($c === "\n")  { $out .= '\\n';  continue; }
-                if ($c === "\r")  { $out .= '\\r';  continue; }
-                if ($c === "\t")  { $out .= '\\t';  continue; }
-                if ($ord < 0x20)  { $out .= sprintf('\\u%04x', $ord); continue; }
+                if ($c === "\n") {
+                    $out .= '\\n';
+                    continue;
+                }
+                if ($c === "\r") {
+                    $out .= '\\r';
+                    continue;
+                }
+                if ($c === "\t") {
+                    $out .= '\\t';
+                    continue;
+                }
+                if ($ord < 0x20) {
+                    $out .= sprintf('\\u%04x', $ord);
+                    continue;
+                }
             } else {
                 if ($ord < 0x20 && $c !== "\n" && $c !== "\r" && $c !== "\t") {
                     continue;
@@ -2120,29 +2170,30 @@ SYSTEMPROMPT;
     /**
      * Parse and sanitize AI JSON response.
      */
-    private function parse_json_response(string $rawresponse): \stdClass {
+    private function parseJsonResponse(string $rawresponse): \stdClass
+    {
         $response = trim($rawresponse);
 
         // Strip anchored markdown fence only.
         // The non-anchored fallback was removed: its non-greedy \{[\s\S]*?\} stops at the
         // first } in nested JSON (e.g. inside a section's lesson object), producing a
-        // truncated/malformed string. extract_json_object() handles all fence formats safely.
+        // truncated/malformed string. extractJsonObject() handles all fence formats safely.
         if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/s', $response, $matches)) {
             $response = trim($matches[1]);
         }
 
         // Extract first balanced JSON object (brace-counting, handles nested fences in content_html).
-        $response = $this->extract_json_object($response);
+        $response = $this->extractJsonObject($response);
 
-        // Fast path — works for clean JSON (JSON mode, no unescaped chars).
+        // Fast path â€” works for clean JSON (JSON mode, no unescaped chars).
         $result = json_decode($response);
         if (json_last_error() === JSON_ERROR_NONE) {
             return $result;
         }
 
         // Sanitize literal newlines/tabs/control-chars inside JSON string values.
-        // Character-by-character — immune to PCRE backtrack limits on large responses.
-        $sanitized = $this->sanitize_json_strings($response);
+        // Character-by-character â€” immune to PCRE backtrack limits on large responses.
+        $sanitized = $this->sanitizeJsonStrings($response);
         $result    = json_decode($sanitized);
         if (json_last_error() === JSON_ERROR_NONE) {
             return $result;
@@ -2162,7 +2213,8 @@ SYSTEMPROMPT;
     /**
      * Merge delta into course data.
      */
-    private function merge_delta($coursedata, $intent, $resultdata) {
+    private function mergeDelta($coursedata, $intent, $resultdata)
+    {
         $action = $intent->action ?? 'update';
         $target = $intent->target ?? 'lesson';
         $sectionidx = $intent->section_index ?? 0;
@@ -2178,7 +2230,7 @@ SYSTEMPROMPT;
             if (isset($updated->sections[$sectionidx])) {
                 array_splice($updated->sections, $sectionidx, 1);
             }
-        } else if ($action === 'add' && $target === 'section') {
+        } elseif ($action === 'add' && $target === 'section') {
             // Add new section.
             $newsection = is_object($resultdata) ? $resultdata : (object) ['name' => 'New Section'];
             if (!isset($newsection->lesson)) {
@@ -2196,19 +2248,19 @@ SYSTEMPROMPT;
             } else {
                 $updated->sections[] = $newsection;
             }
-        } else if (isset($updated->sections[$sectionidx])) {
+        } elseif (isset($updated->sections[$sectionidx])) {
             // Update existing section.
             $section = $updated->sections[$sectionidx];
 
             if ($target === 'lesson' || $target === 'section') {
                 $section->lesson = is_object($resultdata) ? $resultdata : ($section->lesson ?? (object) []);
-            } else if ($target === 'quiz') {
+            } elseif ($target === 'quiz') {
                 if ($action === 'delete') {
                     $section->quiz = (object) ['name' => 'Quiz', 'questions' => []];
                 } else {
                     $section->quiz = is_object($resultdata) ? $resultdata : ($section->quiz ?? (object) []);
                 }
-            } else if ($target === 'question') {
+            } elseif ($target === 'question') {
                 $qidx = $intent->question_index ?? 0;
                 if ($action === 'delete') {
                     // Remove question.
@@ -2220,13 +2272,13 @@ SYSTEMPROMPT;
                         $section->quiz = (object) ['name' => 'Quiz', 'questions' => []];
                     }
                     if ($action === 'add') {
-                        // Append new question — don't overwrite existing.
+                        // Append new question â€” don't overwrite existing.
                         $section->quiz->questions[] = $resultdata;
                     } else {
                         $section->quiz->questions[$qidx] = $resultdata;
                     }
                 }
-            } else if ($target === 'assignment') {
+            } elseif ($target === 'assignment') {
                 if ($action === 'delete') {
                     $section->assignment = null;
                 } else {
@@ -2243,7 +2295,8 @@ SYSTEMPROMPT;
     /**
      * Build success message.
      */
-    private function build_success_message($intent) {
+    private function buildSuccessMessage($intent)
+    {
         $action = $intent->action ?? 'Updated';
         $target = $intent->target ?? 'item';
         $sectionidx = ($intent->section_index ?? 0) + 1;

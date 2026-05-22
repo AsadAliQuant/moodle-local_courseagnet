@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -25,13 +26,15 @@ use core\hook\output\before_footer_html_generation;
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class output {
+class Output
+{
     /**
      * Injects "Create with AI" AMD module on my/courses.php before JS is finalized.
      *
      * @param before_footer_html_generation $hook
      */
-    public static function before_footer(before_footer_html_generation $hook): void {
+    public static function beforeFooter(before_footer_html_generation $hook): void
+    {
         global $PAGE;
 
         if (!$PAGE->url || strpos($PAGE->url->get_path(), 'my/courses.php') === false) {

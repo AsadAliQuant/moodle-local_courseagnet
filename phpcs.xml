@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Moodle">
+    <description>Moodle Plugin Code Sniffer Rules - PSR-12 + Moodle Guidelines</description>
+
+    <!-- Show progress and sniff codes -->
+    <arg value="p"/>
+    <arg name="colors"/>
+    <arg name="extensions" value="php"/>
+
+    <!-- Check all PHP files in this directory -->
+    <file>.</file>
+
+    <!-- Exclude vendor and build directories -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/amd/build/*</exclude-pattern>
+    <exclude-pattern>*/tests/*</exclude-pattern>
+    <exclude-pattern>*/\.git/*</exclude-pattern>
+
+    <!-- PSR12 Standard as base (Moodle defers to PSR-12) -->
+    <rule ref="PSR12">
+        <!-- Allow line length up to 132 chars per Moodle standard -->
+        <exclude name="Generic.Files.LineLength"/>
+    </rule>
+
+    <!-- Moodle line length: 132 chars (soft), 180 (hard) -->
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="132"/>
+            <property name="absoluteLineLimit" value="180"/>
+        </properties>
+    </rule>
+
+    <!-- Forbid short open PHP tag -->
+    <rule ref="Generic.PHP.DisallowShortOpenTag"/>
+</ruleset>

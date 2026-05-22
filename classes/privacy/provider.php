@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -32,16 +33,18 @@ use core_privacy\local\request\writer;
 /**
  * Privacy provider for Course Agent plugin.
  */
-class provider implements
+class Provider implements
     \core_privacy\local\metadata\provider,
-    \core_privacy\local\request\core_userdata_provider {
+    \core_privacy\local\request\core_userdata_provider
+{
     /**
      * Returns meta data about this system.
      *
      * @param collection $collection The initialised collection to add items to.
      * @return collection A listing of personal data locations through this system.
      */
-    public static function get_metadata(collection $collection): collection {
+    public static function getMetadata(collection $collection): collection
+    {
         $collection->add_database_table(
             'courseagent_sessions',
             [
@@ -63,7 +66,8 @@ class provider implements
      * @param int $userid The user to search.
      * @return contextlist $contextlist The contextlist containing the list of contexts used in this plugin.
      */
-    public static function get_contexts_for_userid(int $userid): contextlist {
+    public static function getContextsForUserid(int $userid): contextlist
+    {
         $contextlist = new contextlist();
         $contextlist->add_user_context($userid);
         return $contextlist;
@@ -74,7 +78,8 @@ class provider implements
      *
      * @param approved_contextlist $contextlist The approved contexts to export information for.
      */
-    public static function export_user_data(approved_contextlist $contextlist) {
+    public static function exportUserData(approved_contextlist $contextlist)
+    {
         global $DB;
 
         $user = $contextlist->get_user();
@@ -95,7 +100,8 @@ class provider implements
      *
      * @param \context $context The specific context to delete data for.
      */
-    public static function delete_data_for_all_users_in_context(\context $context) {
+    public static function deleteDataForAllUsersInContext(\context $context)
+    {
         global $DB;
 
         if ($context->contextlevel == CONTEXT_USER) {
@@ -108,7 +114,8 @@ class provider implements
      *
      * @param approved_contextlist $contextlist The approved context and user to delete data for.
      */
-    public static function delete_data_for_user(approved_contextlist $contextlist) {
+    public static function deleteDataForUser(approved_contextlist $contextlist)
+    {
         global $DB;
 
         if (empty($contextlist->count())) {

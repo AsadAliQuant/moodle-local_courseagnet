@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -27,11 +28,13 @@ require_once($CFG->libdir . '/formslib.php');
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class provider_form extends \moodleform {
+class ProviderForm extends \moodleform
+{
     /**
      * Define the form fields for provider add/edit.
      */
-    public function definition() {
+    public function definition()
+    {
         global $CFG;
 
 // phpcs:disable moodle.Files.LineLength.TooLong
@@ -94,7 +97,7 @@ class provider_form extends \moodleform {
             'static',
             'models_widget',
             get_string('provider_models', 'local_courseagent'),
-            $this->render_models_widget($provider)
+            $this->renderModelsWidget($provider)
         );
         $mform->addHelpButton('models_widget', 'provider_models', 'local_courseagent');
 
@@ -122,7 +125,7 @@ class provider_form extends \moodleform {
             'static',
             'test_widget',
             '',
-            $this->render_test_button()
+            $this->renderTestButton()
         );
 
         // Action buttons.
@@ -135,7 +138,8 @@ class provider_form extends \moodleform {
      * @param \stdClass|null $provider Existing provider (for pre-population)
      * @return string HTML
      */
-    private function render_models_widget(?\stdClass $provider): string {
+    private function renderModelsWidget(?\stdClass $provider): string
+    {
         $existing = [];
         if ($provider && !empty($provider->models)) {
             $decoded = json_decode($provider->models, true);
@@ -233,7 +237,7 @@ class provider_form extends \moodleform {
             var badge = document.createElement('span');
             badge.className = 'badge badge-primary badge-pill mr-2';
             badge.title = idx === 0 ? '{$defaultmodel}' : '{$modellabel}'.replace('{\$a}', (idx + 1));
-            badge.textContent = idx === 0 ? '★' : (idx + 1);
+            badge.textContent = idx === 0 ? 'â˜…' : (idx + 1);
 
             // Editable model name.
             var nameEl = document.createElement('span');
@@ -385,7 +389,8 @@ HTML;
      *
      * @return string HTML
      */
-    private function render_test_button(): string {
+    private function renderTestButton(): string
+    {
         global $PAGE;
 
         $provider = $this->_customdata['provider'] ?? null;
@@ -404,7 +409,7 @@ HTML;
         $checkconsole = get_string('check_console_debug', 'local_courseagent');
         $requesterror = get_string('request_error', 'local_courseagent');
         global $OUTPUT;
-        $iconvalidhtml   = $OUTPUT->pix_icon('i/valid',   '', 'moodle', ['class' => 'mr-1']);
+        $iconvalidhtml   = $OUTPUT->pix_icon('i/valid', '', 'moodle', ['class' => 'mr-1']);
         $iconinvalidhtml = $OUTPUT->pix_icon('i/invalid', '', 'moodle', ['class' => 'mr-1']);
 
         // Inject JavaScript using Moodle's js_init_code() for plain JS execution.
@@ -603,7 +608,7 @@ btn.addEventListener('click', function(e) {
         }
 
         if (data.success) {
-            console.log('[Course Agent] ✓ SUCCESS: Connection test passed!');
+            console.log('[Course Agent] âœ“ SUCCESS: Connection test passed!');
             result.className = 'mt-2 alert alert-success';
             result.innerHTML = '<strong>{$iconvalidhtml}{$testlabel}:</strong> ' +
                 (data.message || 'Connection successful!') +
@@ -611,7 +616,7 @@ btn.addEventListener('click', function(e) {
                 (data.ai_response ? '<br><em>AI replied: ' + escapeHtml(data.ai_response) + '</em>' : '') +
                 responseBodyHtml;
         } else {
-            console.error('[Course Agent] ✗ FAILED: Connection test failed!');
+            console.error('[Course Agent] âœ— FAILED: Connection test failed!');
             result.className = 'mt-2 alert alert-danger';
             result.innerHTML = '<strong>{$iconinvalidhtml}{$testlabel}:</strong> ' +
                 (data.message || 'Connection failed') +
@@ -640,7 +645,7 @@ btn.addEventListener('click', function(e) {
     })
     .catch(function(err) {
         console.error('[Course Agent] ========================================');
-        console.error('[Course Agent] ✗ AJAX/FETCH ERROR');
+        console.error('[Course Agent] âœ— AJAX/FETCH ERROR');
         console.error('[Course Agent] ========================================');
         console.error('[Course Agent] Error:', err);
         console.error('[Course Agent] Error Message:', err.message);
@@ -705,7 +710,8 @@ HTML;
      * @param array $files
      * @return array Errors
      */
-    public function validation($data, $files) {
+    public function validation($data, $files)
+    {
         $errors = parent::validation($data, $files);
 
         // Name uniqueness check.
@@ -733,7 +739,7 @@ HTML;
             }
         }
 
-        // Models are optional — allow submission with zero models.
+        // Models are optional â€” allow submission with zero models.
         // (The AI call will fall back to a provider-level default if no model is specified.)
 
         return $errors;

@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -28,7 +29,8 @@
  *
  * @param global_navigation $navigation The navigation object
  */
-function local_courseagent_extend_navigation(global_navigation $navigation): void {
+function local_courseagent_extend_navigation(global_navigation $navigation): void
+{
     global $PAGE;
 
     // Check capability - only show for teachers, managers, admins.
@@ -100,7 +102,8 @@ function local_courseagent_extend_navigation_user(
  * @param settings_navigation $settingsnav The settings navigation object
  * @param context $context The current context
  */
-function local_courseagent_extend_settings_navigation(settings_navigation $settingsnav, context $context): void {
+function local_courseagent_extend_settings_navigation(settings_navigation $settingsnav, context $context): void
+{
     global $PAGE;
 
     // Only add on site context (front page/admin pages).
@@ -129,6 +132,7 @@ function local_courseagent_extend_settings_navigation(settings_navigation $setti
     }
 }
 
-function local_courseagent_get_icon_map() {
+function local_courseagent_get_icon_map()
+{
     return ['local_courseagent:wand' => 'fa-wand-magic-sparkles'];
 }

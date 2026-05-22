@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -83,7 +84,7 @@ if ($action === 'delete' && $id && confirm_sesskey()) {
 
 // Action: Set default.
 if ($action === 'setdefault' && $id && confirm_sesskey()) {
-    provider::set_default($id);
+    provider::setDefault($id);
     redirect(
         new moodle_url('/local/courseagent/providers.php'),
         get_string('provider_set_default', 'local_courseagent'),
@@ -96,7 +97,7 @@ if ($action === 'setdefault' && $id && confirm_sesskey()) {
 if ($action === 'toggle' && $id && confirm_sesskey()) {
     $rec = provider::get($id);
     if ($rec) {
-        provider::set_enabled($id, !$rec->enabled);
+        provider::setEnabled($id, !$rec->enabled);
         redirect(new moodle_url('/local/courseagent/providers.php'));
     }
 }
@@ -106,7 +107,7 @@ if ($action === 'test' && $id) {
     header('Content-Type: application/json');
     try {
         require_sesskey();
-        $result = provider::test_connection($id);
+        $result = provider::testConnection($id);
         echo json_encode([
             'success'     => $result->success,
             'message'     => $result->message,
@@ -147,7 +148,7 @@ if ($isediting) {
             'models_json' => $rec->models,
         ]);
     }
-} else if ($isadding || $formsubmitted) {
+} elseif ($isadding || $formsubmitted) {
     // Create form for both "add" display AND form submission processing.
     $form = new provider_form(new moodle_url('/local/courseagent/providers.php'), ['provider' => null]);
 }
@@ -174,7 +175,7 @@ if ($form) {
         // If editing and API key is blank, keep the existing key.
         if (!empty($data->id) && empty(trim($data->apikey ?? ''))) {
             $existing         = provider::get($data->id);
-            $data->apikey     = provider::decrypt_apikey($existing->apikey);
+            $data->apikey     = provider::decryptApikey($existing->apikey);
         }
 
         if (!empty($data->id)) {
@@ -235,7 +236,7 @@ if ($form) {
 
     echo $OUTPUT->heading($pageheading);
 
-    // Preset buttons — only on the Add (not Edit) page.
+    // Preset buttons â€” only on the Add (not Edit) page.
     if ($isadding) {
         $presets = [
             'openrouter' => [
@@ -285,12 +286,14 @@ if ($form) {
 
         echo html_writer::start_div('courseagent-presets card mb-4 border-0 bg-light');
         echo html_writer::start_div('card-body py-3');
-        echo html_writer::tag('p',
+        echo html_writer::tag(
+            'p',
             html_writer::tag('i', '', ['class' => 'fa fa-bolt mr-1']) .
             get_string('preset_quicksetup', 'local_courseagent'),
             ['class' => 'font-weight-semibold mb-2']
         );
-        echo html_writer::tag('p',
+        echo html_writer::tag(
+            'p',
             get_string('preset_quicksetup_desc', 'local_courseagent'),
             ['class' => 'text-muted small mb-3']
         );
@@ -304,7 +307,8 @@ if ($form) {
                 'class'  => 'mr-2',
                 'alt'    => $p['label'],
             ]);
-            $btnhtml .= html_writer::tag('button',
+            $btnhtml .= html_writer::tag(
+                'button',
                 $imghtml . $p['label'],
                 [
                     'type'         => 'button',
@@ -382,7 +386,7 @@ echo html_writer::div(
     'mb-3'
 );
 
-$providers = provider::get_all();
+$providers = provider::getAll();
 
 if (empty($providers)) {
     echo $OUTPUT->notification(get_string('provider_no_providers', 'local_courseagent'), 'notifymessage');
@@ -411,7 +415,7 @@ if (empty($providers)) {
                 $modelshtml .= ' ' . html_writer::tag('span', '+' . ($modelcount - 1) . ' ' . get_string('more_models', 'local_courseagent'), ['class' => 'badge badge-light border text-muted']);
             }
         } else {
-            $modelshtml = html_writer::tag('span', '—', ['class' => 'text-muted']);
+            $modelshtml = html_writer::tag('span', 'â€”', ['class' => 'text-muted']);
         }
 
         // Status badges.
@@ -466,7 +470,7 @@ if (empty($providers)) {
             format_string($p->name),
             html_writer::link(
                 $p->baseurl,
-                html_writer::tag('code', strlen($p->baseurl) > 45 ? substr($p->baseurl, 0, 45) . '…' : $p->baseurl, ['class' => 'small']),
+                html_writer::tag('code', strlen($p->baseurl) > 45 ? substr($p->baseurl, 0, 45) . 'â€¦' : $p->baseurl, ['class' => 'small']),
                 ['target' => '_blank', 'rel' => 'noopener', 'title' => $p->baseurl]
             ),
             $modelshtml,

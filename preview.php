@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -21,6 +22,7 @@
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
+
 // phpcs:disable moodle.Commenting.MissingDocblock.File
 
 require_once(__DIR__ . '/../../config.php');

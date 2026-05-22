@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -24,7 +25,8 @@ namespace local_courseagent;
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class provider {
+class Provider
+{
     /** @var string Encryption key for API keys */
     private static $cipher = 'aes-256-cbc';
 
@@ -36,7 +38,8 @@ class provider {
      *
      * @return string
      */
-    private static function get_encryption_key(): string {
+    private static function getEncryptionKey(): string
+    {
         $siteid = get_site_identifier();
         return hash('sha256', $siteid . 'courseagent_encryption_key', true);
     }
@@ -47,12 +50,13 @@ class provider {
      * @param string $apikey Plain text API key
      * @return string Encrypted API key (base64 encoded)
      */
-    public static function encrypt_apikey(string $apikey): string {
+    public static function encryptApikey(string $apikey): string
+    {
         if (empty($apikey)) {
             return '';
         }
 
-        $key = self::get_encryption_key();
+        $key = self::getEncryptionKey();
         $ivlen = openssl_cipher_iv_length(self::$cipher);
         $iv = openssl_random_pseudo_bytes($ivlen);
         $encrypted = openssl_encrypt($apikey, self::$cipher, $key, OPENSSL_RAW_DATA, $iv);
@@ -67,12 +71,13 @@ class provider {
      * @param string $encryptedkey Encrypted API key (base64 encoded)
      * @return string Decrypted API key
      */
-    public static function decrypt_apikey(string $encryptedkey): string {
+    public static function decryptApikey(string $encryptedkey): string
+    {
         if (empty($encryptedkey)) {
             return '';
         }
 
-        $key = self::get_encryption_key();
+        $key = self::getEncryptionKey();
         $c = base64_decode($encryptedkey);
         $ivlen = openssl_cipher_iv_length(self::$cipher);
         $sha2len = 32; // HMAC-SHA256 length.
@@ -96,7 +101,8 @@ class provider {
      * @param bool $enabledonly Only return enabled providers
      * @return array Array of provider records
      */
-    public static function get_all(bool $enabledonly = false): array {
+    public static function getAll(bool $enabledonly = false): array
+    {
         global $DB;
 
         $conditions = $enabledonly ? ['enabled' => 1] : [];
@@ -109,7 +115,8 @@ class provider {
      * @param int $id Provider ID
      * @return \stdClass|false Provider record or false
      */
-    public static function get(int $id) {
+    public static function get(int $id)
+    {
         global $DB;
         return $DB->get_record('courseagent_providers', ['id' => $id]);
     }
@@ -119,7 +126,8 @@ class provider {
      *
      * @return \stdClass|false Provider record or false
      */
-    public static function get_default() {
+    public static function getDefault()
+    {
         global $DB;
 
         // Try to get default provider.
@@ -138,11 +146,12 @@ class provider {
      * Returns decrypted API key and all settings.
      *
      * @param int|null $providerid Provider ID or null for default
-     * @return \stdClass Provider configuration
+     * @return \stdclass Provider configuration
      * @throws \Exception If provider not found
      */
-    public static function get_config(?int $providerid = null): \stdClass {
-        $provider = $providerid ? self::get($providerid) : self::get_default();
+    public static function getConfig(?int $providerid = null): \stdClass
+    {
+        $provider = $providerid ? self::get($providerid) : self::getDefault();
 
         if (!$provider) {
             throw new \Exception('No AI provider configured. Please add a provider in plugin settings.');
@@ -150,7 +159,7 @@ class provider {
 
         // Decrypt API key.
         $config = clone $provider;
-        $config->apikey_decrypted = self::decrypt_apikey($provider->apikey);
+        $config->apikey_decrypted = self::decryptApikey($provider->apikey);
 
         // Parse models JSON.
         $config->models_array = !empty($provider->models) ? json_decode($provider->models, true) : [];
@@ -164,7 +173,8 @@ class provider {
      * @param \stdClass $data Provider data
      * @return int New provider ID
      */
-    public static function create(\stdClass $data): int {
+    public static function create(\stdClass $data): int
+    {
         global $DB;
 
         // Debug: Check if we have data
@@ -177,7 +187,7 @@ class provider {
 
         $record = new \stdClass();
         $record->name = trim($data->name);
-        $record->apikey = self::encrypt_apikey($data->apikey);
+        $record->apikey = self::encryptApikey($data->apikey);
         $record->baseurl = rtrim(trim($data->baseurl), '/');
         $record->endpoint = trim($data->endpoint);
         $record->api_format = in_array($data->api_format ?? '', ['openai', 'gemini']) ? $data->api_format : 'openai';
@@ -209,13 +219,14 @@ class provider {
      * @param \stdClass $data Provider data
      * @return bool Success
      */
-    public static function update(int $id, \stdClass $data): bool {
+    public static function update(int $id, \stdClass $data): bool
+    {
         global $DB;
 
         $existing = $DB->get_record('courseagent_providers', ['id' => $id], '*', MUST_EXIST);
 
         $existing->name = trim($data->name);
-        $existing->apikey = self::encrypt_apikey($data->apikey);
+        $existing->apikey = self::encryptApikey($data->apikey);
         $existing->baseurl = rtrim(trim($data->baseurl), '/');
         $existing->endpoint = trim($data->endpoint);
         $existing->api_format = in_array($data->api_format ?? '', ['openai', 'gemini']) ? $data->api_format : 'openai';
@@ -239,7 +250,8 @@ class provider {
      * @param int $id Provider ID
      * @return bool Success
      */
-    public static function delete(int $id): bool {
+    public static function delete(int $id): bool
+    {
         global $DB;
         return $DB->delete_records('courseagent_providers', ['id' => $id]);
     }
@@ -250,7 +262,8 @@ class provider {
      * @param int $id Provider ID
      * @return bool Success
      */
-    public static function set_default(int $id): bool {
+    public static function setDefault(int $id): bool
+    {
         global $DB;
 
         // Unset all defaults.
@@ -267,7 +280,8 @@ class provider {
      * @param bool $enabled Enable or disable
      * @return bool Success
      */
-    public static function set_enabled(int $id, bool $enabled): bool {
+    public static function setEnabled(int $id, bool $enabled): bool
+    {
         global $DB;
         return $DB->set_field('courseagent_providers', 'enabled', $enabled ? 1 : 0, ['id' => $id]);
     }
@@ -282,7 +296,8 @@ class provider {
      * @param string|null $model Optional model ID
      * @return \stdClass Test result with success, message, httpcode, and ai_response
      */
-    public static function test_connection_raw(string $baseurl, string $endpoint, string $apikey, ?string $model = null, string $apiformat = 'openai'): \stdClass {
+    public static function testConnectionRaw(string $baseurl, string $endpoint, string $apikey, ?string $model = null, string $apiformat = 'openai'): \stdClass
+    {
         global $CFG;
 
         $result = new \stdClass();
@@ -404,7 +419,7 @@ class provider {
             if ($error) {
                 $result->message = 'cURL Error: ' . $error;
                 $result->debug->curl_error = $error;
-            } else if ($httpcode >= 200 && $httpcode < 300) {
+            } elseif ($httpcode >= 200 && $httpcode < 300) {
                 $result->success = true;
                 $result->message = 'Connection successful! API responded with HTTP ' . $httpcode;
 
@@ -512,10 +527,11 @@ class provider {
      * @param int $providerid Provider ID
      * @return \stdClass Test result with success, message, and response
      */
-    public static function test_connection(int $providerid): \stdClass {
+    public static function testConnection(int $providerid): \stdClass
+    {
         global $CFG;
 
-        $config = self::get_config($providerid);
+        $config = self::getConfig($providerid);
         $result = new \stdClass();
         $result->success = false;
         $result->message = '';
@@ -626,7 +642,7 @@ class provider {
             if ($error) {
                 $result->message = 'cURL Error: ' . $error;
                 $result->debug->curl_error = $error;
-            } else if ($httpcode >= 200 && $httpcode < 300) {
+            } elseif ($httpcode >= 200 && $httpcode < 300) {
                 $result->success = true;
                 $result->message = 'Connection successful! API responded with HTTP ' . $httpcode;
 
@@ -731,11 +747,12 @@ class provider {
      * @return string AI response text
      * @throws \Exception On API error
      */
-    public static function call_api(string $prompt, ?int $providerid = null, ?string $model = null, ?string $systemprompt = null): string {
+    public static function callApi(string $prompt, ?int $providerid = null, ?string $model = null, ?string $systemprompt = null): string
+    {
         // 240s PHP window > 180s cURL timeout so cURL always fails cleanly first.
         set_time_limit(240);
 
-        $config = self::get_config($providerid);
+        $config = self::getConfig($providerid);
         $apikey = $config->apikey_decrypted;
         // Build URL - only add slash and endpoint if endpoint is not empty.
         $url = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
@@ -746,7 +763,7 @@ class provider {
         // Determine model.
         $model = $model ?? (!empty($config->models_array) ? $config->models_array[0] : '');
 
-        // Use the explicit api_format stored with the provider — no URL sniffing.
+        // Use the explicit api_format stored with the provider â€” no URL sniffing.
         $isgemini = ($config->api_format === 'gemini');
 
         if ($isgemini) {
@@ -825,7 +842,7 @@ class provider {
 
     /**
      * Call AI API with conversation history + new user turn.
-     * Used by the conversational assistant — passes full message history so AI has context.
+     * Used by the conversational assistant â€” passes full message history so AI has context.
      *
      * @param array  $history     Array of {role: 'user'|'assistant', content: string}
      * @param string $userturn    The new user message to append
@@ -833,11 +850,12 @@ class provider {
      * @return string AI response text
      * @throws \Exception On API error
      */
-    public static function call_api_with_history(array $history, string $userturn, string $systemprompt = '', ?int $providerid = null, ?string $model = null): string {
+    public static function callApiWithHistory(array $history, string $userturn, string $systemprompt = '', ?int $providerid = null, ?string $model = null): string
+    {
         // 240s PHP window > 180s cURL timeout so cURL always fails cleanly first.
         set_time_limit(240);
 
-        $config = self::get_config($providerid);
+        $config = self::getConfig($providerid);
         $apikey = $config->apikey_decrypted;
         $model  = $model ?? (!empty($config->models_array) ? $config->models_array[0] : '');
         $url    = $config->endpoint ? ($config->baseurl . '/' . $config->endpoint) : $config->baseurl;
@@ -930,7 +948,8 @@ class provider {
      * @param mixed $response Parsed JSON response
      * @return array Structure analysis
      */
-    private static function analyzeresponsestructure($response): array {
+    private static function analyzeresponsestructure($response): array
+    {
         if (!is_object($response) && !is_array($response)) {
             return ['type' => gettype($response), 'error' => 'Response is not an object/array'];
         }

@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -28,7 +29,8 @@
  * @param int $oldversion The version we are upgrading from.
  * @return bool
  */
-function xmldb_local_courseagent_upgrade($oldversion) {
+function xmldb_local_courseagent_upgrade($oldversion)
+{
     global $DB;
 
     $dbman = $DB->get_manager();

@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -31,7 +32,8 @@
  *
  * @return bool True on success
  */
-function xmldb_local_courseagent_install() {
+function xmldb_local_courseagent_install()
+{
     global $DB;
 
     // Database tables are already created by install.xml at this point.

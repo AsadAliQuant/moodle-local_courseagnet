@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -26,13 +27,15 @@ use core\hook\navigation\primary_extend;
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class navigation {
+class Navigation
+{
     /**
      * Add Course Agent link to the primary top navbar (Moodle 5.x).
      *
      * @param primary_extend $hook
      */
-    public static function extend_primary_navigation(primary_extend $hook): void {
+    public static function extendPrimaryNavigation(primary_extend $hook): void
+    {
         // Check capability - only show for teachers, managers, admins.
         $context = \context_system::instance();
         if (!has_any_capability(['moodle/course:create', 'moodle/site:config', 'local/courseagent:createcourse'], $context)) {

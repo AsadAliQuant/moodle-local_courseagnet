@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -21,6 +22,7 @@
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
+
 // phpcs:disable moodle.Commenting.MissingDocblock.File
 
 require_once(__DIR__ . '/../../config.php');
@@ -48,8 +50,8 @@ $saasapikey       = get_config('local_courseagent', 'saas_api_key') ?: '';
 $hassaaskey       = !empty($saasapikey);
 
 // Get available providers.
-$providers       = provider::get_all(true);
-$defaultprovider = provider::get_default();
+$providers       = provider::getAll(true);
+$defaultprovider = provider::getDefault();
 
 // Check if any provider is configured.
 if (empty($providers)) {
@@ -75,7 +77,7 @@ foreach ($providers as $p) {
     ];
 }
 
-// Pass only small config to JavaScript — strings/wwwroot/sesskey loaded in JS via core/str and core/config.
+// Pass only small config to JavaScript â€” strings/wwwroot/sesskey loaded in JS via core/str and core/config.
 $jsconfig = [
     'maxSections'       => (int)  $maxsections,
     'maxQuizQuestions'  => (int)  $maxquiz,
@@ -120,7 +122,7 @@ echo $OUTPUT->header();
                             </small>
                         </div>
 
-                        <!-- Upload content — PRO lock -->
+                        <!-- Upload content â€” PRO lock -->
                         <div class="form-group mt-3">
                             <label class="font-weight-bold d-flex align-items-center">
                                 <?php print_string('upload_content', 'local_courseagent'); ?>
@@ -427,7 +429,7 @@ echo $OUTPUT->header();
     </div>
 </div>
 
-<!-- Plan approval modal (paid users only — populated by JS after plan API call) -->
+<!-- Plan approval modal (paid users only â€” populated by JS after plan API call) -->
 <div id="ca-plan-modal" class="ca-loading-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ca-plan-modal-title">
     <div class="ca-loading-modal-content" style="max-width:660px;max-height:82vh;overflow-y:auto;">
         <div class="mb-3">
@@ -458,3 +460,4 @@ echo $OUTPUT->header();
 </div>
 
 <?php echo $OUTPUT->footer();
+

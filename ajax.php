@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle.
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -27,13 +28,14 @@ require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/classes/api.php');
 require_once(__DIR__ . '/classes/extractor.php');
 
-use local_courseagent\provider;
-use local_courseagent\api;
+use local_courseagent\Provider;
+use local_courseagent\Api;
 
 /**
  * Write progress update to a temp file for client polling.
  */
-function courseagent_write_progress($step, $percent, $message) {
+function courseagent_write_progress($step, $percent, $message)
+{
     global $USER;
     $dir = make_temp_directory('courseagent');
     $file = $dir . '/progress_' . $USER->id . '.json';
@@ -60,7 +62,7 @@ header('Content-Type: application/json');
 
 // Catch PHP fatal errors (OOM, timeout, etc.) and return JSON instead of empty 500.
 ob_start();
-register_shutdown_function(function() {
+register_shutdown_function(function () {
     $err = error_get_last();
     if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
         ob_end_clean();
@@ -79,7 +81,7 @@ register_shutdown_function(function() {
 try {
     switch ($action) {
         case 'plan':
-            // Generate lightweight course plan (paid users only — called before full generation).
+            // Generate lightweight course plan (paid users only â€” called before full generation).
             $topic             = optional_param('topic', '', PARAM_TEXT);
             $level             = optional_param('level', 'intermediate', PARAM_TEXT);
             $numsections       = optional_param('numsections', 4, PARAM_INT);
@@ -96,8 +98,8 @@ try {
                 throw new Exception(get_string('error_no_topic', 'local_courseagent'));
             }
 
-            $api  = new api();
-            $plan = $api->plan_course_outline(
+            $api  = new Api();
+            $plan = $api->planCourseOutline(
                 $topic,
                 $level,
                 $numsections,
@@ -153,8 +155,8 @@ try {
                 : null;
 
             // Generate course using AI.
-            $api = new api();
-            $coursedata = $api->generate_course_outline(
+            $api = new Api();
+            $coursedata = $api->generateCourseOutline(
                 $topic,
                 $level,
                 $numsections,
@@ -199,8 +201,8 @@ try {
                 throw new Exception(get_string('error_invalid_json', 'local_courseagent'));
             }
 
-            $api = new api();
-            $result = $api->publish_course($coursedata);
+            $api = new Api();
+            $result = $api->publishCourse($coursedata);
             $courseurl = new moodle_url('/course/view.php', ['id' => $result['courseid']]);
 
             echo json_encode([
@@ -215,7 +217,7 @@ try {
             // Test AI provider connection.
             $providerid = required_param('providerid', PARAM_INT);
 
-            $result = provider::test_connection($providerid);
+            $result = provider::testConnection($providerid);
 
             echo json_encode([
                 'success' => $result->success,
@@ -240,7 +242,7 @@ try {
             $model     = optional_param('model', '', PARAM_TEXT);
             $apiformat = optional_param('api_format', 'openai', PARAM_ALPHA);
 
-            $result = provider::test_connection_raw($baseurl, $endpoint, $apikey, $model ?: null, $apiformat);
+            $result = provider::testConnection_raw($baseurl, $endpoint, $apikey, $model ?: null, $apiformat);
 
             // TEMPORARY DEBUG: Capture the actual response
             error_log("Course Agent - test_provider_raw result object: " . print_r($result, true));
@@ -362,13 +364,13 @@ try {
                 throw new \Exception(get_string('error_no_preview_data', 'local_courseagent'));
             }
 
-            $api = new api();
+            $api = new Api();
 
             if ($action === 'ai_assist') {
                 if (empty($userprompt)) {
                     throw new \Exception('User prompt is required.');
                 }
-                $result = $api->ai_assist($coursedata, $userprompt);
+                $result = $api->aiAssist($coursedata, $userprompt);
             } else {
                 // Legacy targeted edit.
                 $targettype    = $input->target_type    ?? '';
@@ -377,7 +379,7 @@ try {
                 if (empty($targettype) || empty($userprompt)) {
                     throw new \Exception(get_string('error_edit_params', 'local_courseagent'));
                 }
-                $result = $api->edit_item($coursedata, $targettype, $targetindex, $questionindex, $userprompt);
+                $result = $api->editItem($coursedata, $targettype, $targetindex, $questionindex, $userprompt);
             }
 
             // Update session with full merged course.

@@ -1,4 +1,5 @@
 <?php
+
 // This file is part of Course Agent - AI Course Creator Plugin for Moodle
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -34,7 +35,8 @@
  *
  * @return bool True on success
  */
-function xmldb_local_courseagent_uninstall() {
+function xmldb_local_courseagent_uninstall()
+{
     global $DB;
 
     // Remove all plugin configuration settings from config_plugins.
