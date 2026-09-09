@@ -204,6 +204,8 @@ $string['saas_heading'] = 'CourseAgent License';
 $string['saas_heading_desc'] = 'Enter your license key to unlock paid advanced features. Leave blank to use local AI providers only.';
 $string['saas_api_key'] = 'License Key';
 $string['saas_api_key_desc'] = 'Your CourseAgent license key, received when activating your plan.';
+$string['saas_base_url'] = 'Service URL';
+$string['saas_base_url_desc'] = 'Base URL of the CourseAgent service, without a trailing slash. Leave the default unless you were given a different address. A COURSEAGENT_SAAS_URL constant in config.php overrides this setting.';
 
 // H5P activity toggle on course creation form.
 $string['include_h5p'] = 'Generate H5P Activities';

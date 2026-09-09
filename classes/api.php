@@ -1148,9 +1148,7 @@ class api
             // type in the section's h5p[] array, clamped. Each call is a billable SaaS request.
             if (!empty($coursedata->_include_h5p) && !empty($section->h5p)) {
                 $saaskey = get_config('local_courseagent', 'saas_api_key') ?: '';
-                $saasurl = defined('COURSEAGENT_SAAS_URL')
-                    ? rtrim(COURSEAGENT_SAAS_URL, '/')
-                    : 'https://api.courseagent.io';
+                $saasurl = \local_courseagent\saas_http::base_url();
                 if (!empty($saaskey)) {
                     $allvalidtypes = [
                         'single_choice_set', 'summary', 'drag_the_words',

@@ -64,4 +64,38 @@ class saas_http {
             'Accept: application/json',
         ];
     }
+
+    /**
+     * Default SaaS base URL, used when nothing else is configured.
+     */
+    const DEFAULT_BASE_URL = 'https://api.courseagent.io';
+
+    /**
+     * Return the SaaS base URL, without a trailing slash.
+     *
+     * Resolution order, most specific first:
+     *   1. The COURSEAGENT_SAAS_URL constant in config.php — lets a site pin the
+     *      endpoint outside the database, and lets developers point a local
+     *      Moodle at `wrangler dev` without touching admin settings.
+     *   2. The local_courseagent/saas_base_url admin setting.
+     *   3. DEFAULT_BASE_URL.
+     *
+     * This exists because the URL used to be duplicated at five call sites
+     * (settings.php, ajax.php x3, api.php, license.php), which meant moving the
+     * backend required editing five files in lockstep.
+     *
+     * @return string
+     */
+    public static function base_url(): string {
+        if (defined('COURSEAGENT_SAAS_URL') && !empty(COURSEAGENT_SAAS_URL)) {
+            return rtrim(COURSEAGENT_SAAS_URL, '/');
+        }
+
+        $configured = get_config('local_courseagent', 'saas_base_url');
+        if (!empty($configured)) {
+            return rtrim(trim($configured), '/');
+        }
+
+        return self::DEFAULT_BASE_URL;
+    }
 }

@@ -42,9 +42,7 @@ if (!class_exists('local_courseagent_licensekey_setting')) {
                 set_config('saas_plan', 'none', 'local_courseagent');
                 return parent::write_setting($data);
             }
-            $saasurl = defined('COURSEAGENT_SAAS_URL')
-                ? rtrim(COURSEAGENT_SAAS_URL, '/')
-                : 'https://api.courseagent.io';
+            $saasurl = \local_courseagent\saas_http::base_url();
             $curl = new \curl(['ignoresecurity' => true]);
             $curl->setHeader(\local_courseagent\saas_http::headers($data));
             $resp     = $curl->get($saasurl . '/api/v1/sites/usage');
@@ -159,6 +157,19 @@ if ($hassiteconfig) {
         get_string('saas_api_key_desc', 'local_courseagent'),
         ''
     ));
+
+    // Where the SaaS lives. Previously hardcoded at five call sites, which made
+    // moving the backend an edit in five files; now read through
+    // \local_courseagent\saas_http::base_url(). The COURSEAGENT_SAAS_URL
+    // constant in config.php still overrides this when set.
+    $settings->add(new admin_setting_configtext(
+        'local_courseagent/saas_base_url',
+        get_string('saas_base_url', 'local_courseagent'),
+        get_string('saas_base_url_desc', 'local_courseagent'),
+        \local_courseagent\saas_http::DEFAULT_BASE_URL,
+        PARAM_URL
+    ));
+
 
     // Activate License button — validates the key against the SaaS and stores the plan.
     $activatedtpl = addslashes(get_string('saas_activated', 'local_courseagent', '__PLAN__'));

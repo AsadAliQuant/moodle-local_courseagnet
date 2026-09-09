@@ -125,9 +125,7 @@ class license {
      * @return array
      */
     private static function call_usage_endpoint(string $apikey): array {
-        $saasurl = defined('COURSEAGENT_SAAS_URL')
-            ? rtrim(COURSEAGENT_SAAS_URL, '/')
-            : 'https://api.courseagent.io';
+        $saasurl = \local_courseagent\saas_http::base_url();
 
         require_once(__DIR__ . '/saas_http.php');
         $curl = new \curl(['ignoresecurity' => true]);

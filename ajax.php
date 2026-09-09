@@ -477,7 +477,7 @@ try {
                 break;
             }
             $saaskey = get_config('local_courseagent', 'saas_api_key');
-            $saasurl = defined('COURSEAGENT_SAAS_URL') ? rtrim(COURSEAGENT_SAAS_URL, '/') : 'https://api.courseagent.io';
+            $saasurl = \local_courseagent\saas_http::base_url();
 
             $ch = curl_init($saasurl . '/api/v1/documents');
             curl_setopt_array($ch, [
@@ -515,7 +515,7 @@ try {
                 break;
             }
             $saaskey  = get_config('local_courseagent', 'saas_api_key');
-            $saasurl  = defined('COURSEAGENT_SAAS_URL') ? rtrim(COURSEAGENT_SAAS_URL, '/') : 'https://api.courseagent.io';
+            $saasurl  = \local_courseagent\saas_http::base_url();
             $step     = optional_param('step', 'outline', PARAM_ALPHA);
             $courseid = optional_param('courseid', 0, PARAM_INT);
             $rawdocids = optional_param('doc_ids', '', PARAM_RAW);
@@ -598,9 +598,7 @@ try {
 
         case 'test_license_key':
             require_capability('moodle/site:config', $context);
-            $saasurl = defined('COURSEAGENT_SAAS_URL')
-                ? rtrim(COURSEAGENT_SAAS_URL, '/')
-                : 'https://api.courseagent.io';
+            $saasurl = \local_courseagent\saas_http::base_url();
             $apikey = get_config('local_courseagent', 'saas_api_key') ?: '';
             if (empty($apikey)) {
                 echo json_encode(['success' => false, 'message' => 'No license key configured.']);
