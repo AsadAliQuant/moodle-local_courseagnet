@@ -32,8 +32,13 @@ use core_privacy\local\request\writer;
 
 /**
  * Privacy provider for Course Agent plugin.
+ *
+ * Class name is lowercase to match the file name (provider.php) and Moodle's
+ * mandatory naming for privacy providers. Methods are snake_case to match
+ * the interface contract defined by core_privacy.
  */
-class Provider implements
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class provider implements
     \core_privacy\local\metadata\provider,
     \core_privacy\local\request\core_userdata_provider
 {
@@ -43,7 +48,7 @@ class Provider implements
      * @param collection $collection The initialised collection to add items to.
      * @return collection A listing of personal data locations through this system.
      */
-    public static function getMetadata(collection $collection): collection
+    public static function get_metadata(collection $collection): collection
     {
         $collection->add_database_table(
             'courseagent_sessions',
@@ -66,7 +71,7 @@ class Provider implements
      * @param int $userid The user to search.
      * @return contextlist $contextlist The contextlist containing the list of contexts used in this plugin.
      */
-    public static function getContextsForUserid(int $userid): contextlist
+    public static function get_contexts_for_userid(int $userid): contextlist
     {
         $contextlist = new contextlist();
         $contextlist->add_user_context($userid);
@@ -78,7 +83,7 @@ class Provider implements
      *
      * @param approved_contextlist $contextlist The approved contexts to export information for.
      */
-    public static function exportUserData(approved_contextlist $contextlist)
+    public static function export_user_data(approved_contextlist $contextlist)
     {
         global $DB;
 
@@ -100,7 +105,7 @@ class Provider implements
      *
      * @param \context $context The specific context to delete data for.
      */
-    public static function deleteDataForAllUsersInContext(\context $context)
+    public static function delete_data_for_all_users_in_context(\context $context)
     {
         global $DB;
 
@@ -114,7 +119,7 @@ class Provider implements
      *
      * @param approved_contextlist $contextlist The approved context and user to delete data for.
      */
-    public static function deleteDataForUser(approved_contextlist $contextlist)
+    public static function delete_data_for_user(approved_contextlist $contextlist)
     {
         global $DB;
 

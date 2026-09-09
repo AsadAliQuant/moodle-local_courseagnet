@@ -28,8 +28,11 @@ User Request → index.php → AMD JS → ajax.php → classes/api.php → AI Pr
 
 ## Course Generation Flow
 
-**Free users:** Form → Generate → Preview → Publish  
-**Paid users** (`saas_api_key` set): Form → AI plans structure → Teacher approves modal → Generate (with plan scaffold) → Preview → Publish
+**Standalone users (no SaaS key):** Form → Generate → Preview → Publish  
+Generates courses with Moodle default activities: quizzes, assignments, lessons. Uses the plugin's own AI provider (OpenRouter, Gemini, or NVIDIA NIM) directly. No SaaS account required — free to use.
+
+**SaaS-connected users (`saas_api_key` set):** Form → AI plans structure → Teacher approves modal → Generate (with plan scaffold) → Preview → Publish  
+Unlocks H5P activity generation (17 types via SaaS backend), RAG-based course generation, and the outline-approval step. Requires a `starter` or `pro` plan on the SaaS. Plan enforced server-side — plugin UI gates are cosmetic only.
 
 1. **Plan** (`ajax.php?action=plan`) — *paid users only*:
    - Same form inputs as generate

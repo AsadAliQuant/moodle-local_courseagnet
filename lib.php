@@ -31,7 +31,13 @@
  */
 function local_courseagent_extend_navigation(global_navigation $navigation): void
 {
-    global $PAGE;
+    global $PAGE, $CFG;
+
+    // Inject the tiny mermaid loader on every page.
+    // It checks for .mermaid divs and dynamically loads the heavy mermaid library only if needed.
+    // This bypasses HTML purifier stripping <script> tags from mod_page content.
+    $mermaidurl = $CFG->wwwroot . '/local/courseagent/amd/build/mermaid.min.js';
+    $PAGE->requires->js_call_amd('local_courseagent/mermaid_loader', 'init', [$mermaidurl]);
 
     // Check capability - only show for teachers, managers, admins.
     $context = context_system::instance();

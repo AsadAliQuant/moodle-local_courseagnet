@@ -1,5 +1,6 @@
 # Development / AI-assisted working files — not shipped with the plugin.
 temp_for_ai/
+.claude/
 
 # Node / build tooling (if added later).
 node_modules/
@@ -17,3 +18,7 @@ Thumbs.db
 
 # Moodle cache (should never be committed).
 moodle/.cache/
+
+# Composer dev tooling (phpcs) - not shipped with the plugin.
+vendor/
+composer.lock

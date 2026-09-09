@@ -6,119 +6,271 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
-    function($, Ajax, Notification, Str, CoreConfig) {
+define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config', 'local_courseagent/customselect'],
+    function($, Ajax, Notification, Str, CoreConfig, CustomSelect) {
 
     'use strict';
 
     let config = {};
     let strings = {};
-    let extractedFileText = '';
     let progressTimer = null;
     let generateXhr = null;
 
-    // Accepted MIME types / extensions.
-    const ACCEPTED_EXTS = ['txt','pdf','docx','pptx','odt','rtf','md','csv','epub'];
-    const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50 MB
+    // -------------------------------------------------------------------------
+    // Dual-range sliders + activity sub-option toggles
+    // -------------------------------------------------------------------------
+
+    /**
+     * Build the HTML for one sub-option block (a labelled toggle + dual-range slider).
+     * Used for the JS-injected H5P rule so it matches the static quiz/assignment markup.
+     * @param {Object} o Block options
+     * @return {string} HTML
+     */
+    const buildSubopt = function(o) {
+        const offClass = o.checked ? '' : ' ca-subopt--off';
+        return '<div class="ca-subopt' + offClass + '" id="' + o.id + '-subopt">'
+            + '<div class="ca-subopt-head">'
+            + '<div class="ca-subopt-info">'
+            + '<div class="ca-subopt-title">' + o.title + '</div>'
+            + '<div class="ca-subopt-desc">' + o.desc + '</div>'
+            + '</div>'
+            + '<div class="custom-control custom-switch ca-subopt-switch">'
+            + '<input type="checkbox" class="custom-control-input ca-subopt-toggle" id="' + o.id
+            + '" data-activity="' + o.activity + '"' + (o.checked ? ' checked' : '') + '>'
+            + '<label class="custom-control-label" for="' + o.id + '"></label>'
+            + '</div></div>'
+            + '<div class="ca-subopt-body"><div class="ca-range">'
+            + '<span class="ca-range-val ca-range-val--min">' + o.minVal + '</span>'
+            + '<div class="ca-range-track"><div class="ca-range-fill"></div>'
+            + '<input type="range" class="ca-range-input ca-range-input--min" id="' + o.minId
+            + '" min="' + o.rangeMin + '" max="' + o.rangeMax + '" value="' + o.minVal + '">'
+            + '<input type="range" class="ca-range-input ca-range-input--max" id="' + o.maxId
+            + '" min="' + o.rangeMin + '" max="' + o.rangeMax + '" value="' + o.maxVal + '">'
+            + '</div>'
+            + '<span class="ca-range-val ca-range-val--max">' + o.maxVal + '</span>'
+            + '</div></div></div>';
+    };
+
+    /**
+     * Paint a single .ca-range: position the fill between the thumbs and sync the value labels.
+     * @param {jQuery} $range The .ca-range element
+     */
+    const paintRange = function($range) {
+        const $min = $range.find('.ca-range-input--min');
+        const $max = $range.find('.ca-range-input--max');
+        const lo = parseInt($min.attr('min'), 10);
+        const hi = parseInt($min.attr('max'), 10);
+        const a = parseInt($min.val(), 10);
+        const b = parseInt($max.val(), 10);
+        const span = (hi - lo) || 1;
+        const leftPct = ((a - lo) / span) * 100;
+        const rightPct = ((b - lo) / span) * 100;
+        $range.find('.ca-range-fill').css({ left: leftPct + '%', width: (rightPct - leftPct) + '%' });
+        $range.find('.ca-range-val--min').text(a);
+        $range.find('.ca-range-val--max').text(b);
+        // When the min thumb reaches the top end both thumbs overlap there; lift it above
+        // the max thumb so it stays grabbable (the max thumb wins the overlap everywhere else).
+        $min.css('z-index', a >= hi ? 5 : '');
+    };
+
+    /**
+     * Wire every dual-range slider: keep min <= max and repaint on drag. Idempotent.
+     */
+    const initRangeSliders = function() {
+        $('#courseagent-app .ca-range').each(function() {
+            const $range = $(this);
+            if ($range.data('caRangeInit')) { return; }
+            $range.data('caRangeInit', true);
+            const $min = $range.find('.ca-range-input--min');
+            const $max = $range.find('.ca-range-input--max');
+            $min.on('input change', function() {
+                if (parseInt($min.val(), 10) > parseInt($max.val(), 10)) { $min.val($max.val()); }
+                paintRange($range);
+            });
+            $max.on('input change', function() {
+                if (parseInt($max.val(), 10) < parseInt($min.val(), 10)) { $max.val($min.val()); }
+                paintRange($range);
+            });
+            paintRange($range);
+        });
+    };
+
+    /**
+     * Wire the per-activity sub-option toggles: each flips on/off freely and independently,
+     * dimming its slider when off. Delegated so injected H5P toggles work too.
+     */
+    const initSubToggles = function() {
+        const $app = $('#courseagent-app');
+        if ($app.data('caSubtogglesInit')) { return; }
+        $app.data('caSubtogglesInit', true);
+        // Each sub-option flips on/off freely and independently; just dim its slider when off.
+        $app.on('change', '.ca-subopt-toggle', function() {
+            $(this).closest('.ca-subopt').toggleClass('ca-subopt--off', !this.checked);
+        });
+    };
 
     /**
      * Initialize the course creator.
      * @param {Object} userConfig Configuration object from PHP
      */
     const initH5pTypeSelector = function() {
-        if ($('#include-h5p').length === 0) return;
+        if ($('#include-h5p').length === 0 || $('#h5p-toggle-container').length === 0) return;
+
+        // Only the activity types the activated plan includes are shown. Starter = 7 types,
+        // Pro = all 17 (mirrors backend STARTER_ALLOWED_TYPES in plan_service.py).
+        const allowedKeys = config.saasPlan === 'starter'
+            ? Object.keys(H5P_LABELS).filter(function(key) { return STARTER_TYPES.indexOf(key) !== -1; })
+            : Object.keys(H5P_LABELS);
 
         let pillsHtml = '';
-        Object.keys(H5P_LABELS).forEach(function(key) {
+        allowedKeys.forEach(function(key) {
             const label = H5P_LABELS[key].replace('H5P: ', '');
-            pillsHtml += '<label class="h5p-type-pill badge badge-secondary mr-1 mb-1"'
-                + ' style="cursor:pointer;font-size:0.75em;font-weight:normal;padding:5px 8px;">'
-                + '<input type="checkbox" class="h5p-type-check" value="' + key + '" checked'
-                + ' style="margin-right:4px;vertical-align:middle;"> ' + label + '</label>';
+            const inputId = 'h5p-type-' + key;
+            pillsHtml += '<input type="checkbox" class="btn-check h5p-type-check" id="' + inputId
+                + '" value="' + key + '" autocomplete="off">'
+                + '<label class="btn ca-h5p-pill" for="' + inputId + '">'
+                + '<i class="fa fa-check ca-h5p-pill-check" aria-hidden="true"></i>'
+                + '<span>' + label + '</span></label>';
         });
 
-        const html = '<div id="h5p-type-selector" class="mt-2 p-2 bg-white border rounded" style="display:none;">'
-            + '<div class="d-flex justify-content-between align-items-center mb-1">'
-            + '<small class="font-weight-bold text-muted">Content types the AI can choose:</small>'
-            + '<div><a href="#" id="h5p-select-all" class="small">All</a>'
-            + ' / <a href="#" id="h5p-deselect-all" class="small">None</a></div></div>'
-            + '<div class="d-flex flex-wrap">' + pillsHtml + '</div>'
+        const subheading = strings.h5pSubheading || 'The AI will select the most suitable activity type for each section.';
+        const perSecLabel = strings.perSectionLabel || 'Per section / module';
+        const perSecDesc  = strings.perSectionDesc || 'How many to create in every single section.';
+        const totalLabel  = strings.totalCourseLabel || 'Total across course';
+        const totalDesc   = strings.totalCourseDesc || 'Set a limit for the whole course combined.';
+        const selectedLabel = strings.selectedActivityTypes || 'Selected Activity Types';
+        const selectAllLabel = strings.selectAll || 'Select all';
+        const deselectAllLabel = strings.deselectAll || 'Deselect all';
+
+        const html = '<div id="h5p-type-selector" class="ca-h5p-selector" style="display:none;">'
+            + '<p class="ca-h5p-subhead">' + subheading + '</p>'
+            + '<div class="ca-h5p-pill-head">'
+            + '<span class="ca-h5p-pill-head-label">' + selectedLabel + ' (<span id="h5p-selected-count">0</span>)</span>'
+            + '<span class="ca-h5p-pill-actions">'
+            + '<a href="#" id="h5p-select-all">' + selectAllLabel + '</a>'
+            + '<span class="ca-h5p-sep">/</span>'
+            + '<a href="#" id="h5p-deselect-all">' + deselectAllLabel + '</a></span></div>'
+            + '<div class="ca-h5p-pills">' + pillsHtml + '</div>'
             + '<small id="h5p-type-error" class="text-danger" style="display:none;">'
             + 'Please select at least one content type.</small>'
+            + '<div class="ca-h5p-counts"><div class="ca-subopts">'
+            + buildSubopt({
+                id: 'h5p-per-section-enabled', activity: 'h5p', checked: false,
+                minId: 'h5p-min-per-section', maxId: 'h5p-max-per-section',
+                rangeMin: 1, rangeMax: 10, minVal: 1, maxVal: 3,
+                title: perSecLabel, desc: perSecDesc
+            })
+            + buildSubopt({
+                id: 'h5p-total-enabled', activity: 'h5p', checked: false,
+                minId: 'h5p-min-total', maxId: 'h5p-max-total',
+                rangeMin: 1, rangeMax: 20, minVal: 1, maxVal: 6,
+                title: totalLabel, desc: totalDesc
+            })
+            + '</div></div>'
             + '</div>';
 
-        $('#include-h5p').closest('.d-flex.align-items-center.justify-content-between').after(html);
+        $('#h5p-toggle-container').append(html);
+
+        // The filled/checked pill visual is driven purely by CSS (.h5p-type-check:checked + .ca-h5p-pill),
+        // so JS only keeps the live "(N)" count in sync.
+        const updateSelectedCount = function() {
+            $('#h5p-selected-count').text($('.h5p-type-check:checked').length);
+        };
 
         $('#include-h5p').on('change', function() {
-            $('#h5p-type-selector').toggle($(this).is(':checked'));
+            const $panel = $('#h5p-type-selector').stop(true, true);
+            if ($(this).is(':checked')) {
+                $panel.slideDown(200);
+            } else {
+                $panel.slideUp(200);
+            }
         });
         if ($('#include-h5p').is(':checked')) {
             $('#h5p-type-selector').show();
         }
 
+        $('#h5p-toggle-container').on('change', '.h5p-type-check', function() {
+            updateSelectedCount();
+            $('#h5p-type-error').hide();
+        });
+
         $('#h5p-select-all').on('click', function(e) {
             e.preventDefault();
             $('.h5p-type-check').prop('checked', true);
+            updateSelectedCount();
+            $('#h5p-type-error').hide();
         });
         $('#h5p-deselect-all').on('click', function(e) {
             e.preventDefault();
             $('.h5p-type-check').prop('checked', false);
+            updateSelectedCount();
         });
+
+        updateSelectedCount();
     };
 
     const init = function(userConfig) {
         config = userConfig;
         setupEventListeners();
-        setupDropzone();
-        initH5pTypeSelector();
-
         Str.get_strings([
             {key: 'js:auto_select',               component: 'local_courseagent'},
             {key: 'js:auto_select_first',          component: 'local_courseagent'},
-            {key: 'js:unsupported_filetype',       component: 'local_courseagent'},
-            {key: 'js:file_too_large',             component: 'local_courseagent'},
-            {key: 'js:could_not_extract',          component: 'local_courseagent'},
-            {key: 'js:upload_failed',              component: 'local_courseagent'},
-            {key: 'js:extracting_text',            component: 'local_courseagent'},
-            {key: 'js:characters_extracted',       component: 'local_courseagent'},
             {key: 'js:please_enter_topic',         component: 'local_courseagent'},
             {key: 'js:sections_range_error',       component: 'local_courseagent', param: userConfig.maxSections},
             {key: 'js:failed_generate',            component: 'local_courseagent'},
             {key: 'js:error_generating',           component: 'local_courseagent'},
             {key: 'js:generation_cancelled',       component: 'local_courseagent'},
-            {key: 'js:adding_quizzes_assignments', component: 'local_courseagent'},
-            {key: 'js:adding_quizzes',             component: 'local_courseagent'},
-            {key: 'js:adding_assignments',         component: 'local_courseagent'},
             {key: 'js:planning_course',            component: 'local_courseagent'},
             {key: 'js:plan_failed',                component: 'local_courseagent'},
             {key: 'js:plan_error',                 component: 'local_courseagent'},
-            {key: 'js:generating_from_plan',      component: 'local_courseagent'},
-            {key: 'js:generating_from_plan_desc', component: 'local_courseagent'},
+            {key: 'js:generating_from_plan',       component: 'local_courseagent'},
+            {key: 'js:generating_from_plan_desc',  component: 'local_courseagent'},
+            {key: 'js:h5p_subheading',             component: 'local_courseagent'},
+            {key: 'js:h5p_per_section_label',      component: 'local_courseagent'},
+            {key: 'js:h5p_total_label',            component: 'local_courseagent'},
+            {key: 'js:license_fix_instruction',        component: 'local_courseagent'},
+            {key: 'js:license_open_settings',          component: 'local_courseagent'},
+            {key: 'js:license_transient_instruction',  component: 'local_courseagent'},
+            {key: 'js:selected_activity_types',        component: 'local_courseagent'},
+            {key: 'js:select_all',                     component: 'local_courseagent'},
+            {key: 'js:deselect_all',                   component: 'local_courseagent'},
+            {key: 'js:per_section_label',              component: 'local_courseagent'},
+            {key: 'js:per_section_desc',               component: 'local_courseagent'},
+            {key: 'js:total_course_label',             component: 'local_courseagent'},
+            {key: 'js:total_course_desc',              component: 'local_courseagent'},
         ]).then(function(s) {
             strings = {
                 autoSelect:               s[0],
                 autoSelectFirst:          s[1],
-                unsupportedFiletype:      s[2],
-                fileTooLarge:             s[3],
-                couldNotExtract:          s[4],
-                uploadFailed:             s[5],
-                extractingText:           s[6],
-                charactersExtracted:      s[7],
-                pleaseEnterTopic:         s[8],
-                sectionsRangeError:       s[9],
-                failedGenerate:           s[10],
-                errorGenerating:          s[11],
-                generationCancelled:      s[12],
-                addingQuizzesAssignments: s[13],
-                addingQuizzes:            s[14],
-                addingAssignments:        s[15],
-                planningCourse:           s[16],
-                planFailed:               s[17],
-                planError:                s[18],
-                generatingFromPlan:       s[19],
-                generatingFromPlanDesc:   s[20],
+                pleaseEnterTopic:         s[2],
+                sectionsRangeError:       s[3],
+                failedGenerate:           s[4],
+                errorGenerating:          s[5],
+                generationCancelled:      s[6],
+                planningCourse:           s[7],
+                planFailed:               s[8],
+                planError:                s[9],
+                generatingFromPlan:       s[10],
+                generatingFromPlanDesc:   s[11],
+                h5pSubheading:            s[12],
+                h5pPerSectionLabel:       s[13],
+                h5pTotalLabel:            s[14],
+                licenseFixInstruction:         s[15],
+                licenseOpenSettings:           s[16],
+                licenseTransientInstruction:   s[17],
+                selectedActivityTypes:         s[18],
+                selectAll:                     s[19],
+                deselectAll:                   s[20],
+                perSectionLabel:               s[21],
+                perSectionDesc:                s[22],
+                totalCourseLabel:              s[23],
+                totalCourseDesc:               s[24],
             };
+            CustomSelect.enhance('#courseagent-app select.custom-select');
             updateModelSelector();
+            initH5pTypeSelector();
+            initRangeSliders();
+            initSubToggles();
             return strings;
         }).catch(Notification.exception);
     };
@@ -129,9 +281,39 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
 
     const setupEventListeners = function() {
         $('#btn-generate').on('click', generateCourseOutline);
-        $('#upload-remove').on('click', removeUploadedFile);
         $('#ai-provider').on('change', updateModelSelector);
         $('#btn-cancel-generate').on('click', cancelGeneration);
+        $('#btn-loading-dismiss').on('click', dismissLoadingModal);
+
+        // Quiz min/max: show when quiz toggle is on, hide when off.
+        $('#include-quiz').on('change', function() {
+            const $panel = $('#quiz-minmax').stop(true, true);
+            if ($(this).is(':checked')) {
+                $panel.slideDown(200);
+            } else {
+                $panel.slideUp(200);
+            }
+        });
+        if ($('#include-quiz').is(':checked')) {
+            $('#quiz-minmax').show();
+        } else {
+            $('#quiz-minmax').hide();
+        }
+
+        // Assignment min/max: show when assignment toggle is on, hide when off.
+        $('#include-assignment').on('change', function() {
+            const $panel = $('#assignment-minmax').stop(true, true);
+            if ($(this).is(':checked')) {
+                $panel.slideDown(200);
+            } else {
+                $panel.slideUp(200);
+            }
+        });
+        if ($('#include-assignment').is(':checked')) {
+            $('#assignment-minmax').show();
+        } else {
+            $('#assignment-minmax').hide();
+        }
 
         // Character counter for Course Topic (max 500).
         const $topic = $('#course-topic');
@@ -139,7 +321,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
         if ($topic.length && $counter.length) {
             const updateCounter = function() {
                 const len = $topic.val().length;
-                $counter.text(len + ' / 500');
+                $counter.text(len + ' / 500 chars');
                 $counter.toggleClass('text-danger', len >= 500);
             };
             $topic.on('input', updateCounter);
@@ -161,164 +343,72 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
                 $modelSelect.append('<option value="' + model + '">' + model + '</option>');
             });
         }
-    };
 
-    // -------------------------------------------------------------------------
-    // Dropzone setup
-    // -------------------------------------------------------------------------
-
-    const setupDropzone = function() {
-        const $zone  = $('#upload-dropzone');
-        const $input = $('#upload-file-input');
-
-        // Click on zone -> open file picker.
-        $zone.on('click', function(e) {
-            if ($(e.target).closest('#upload-remove').length) return; // don't open picker when removing
-            $input.trigger('click');
-        });
-
-        // File picker change.
-        $input.on('change', function() {
-            if (this.files && this.files[0]) {
-                handleFileSelected(this.files[0]);
-            }
-        });
-
-        // Drag events.
-        $zone.on('dragover dragenter', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            $zone.addClass('drag-over');
-        });
-
-        $zone.on('dragleave dragend', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            $zone.removeClass('drag-over');
-        });
-
-        $zone.on('drop', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            $zone.removeClass('drag-over');
-            const files = e.originalEvent.dataTransfer.files;
-            if (files && files[0]) {
-                handleFileSelected(files[0]);
-            }
-        });
-    };
-
-    // -------------------------------------------------------------------------
-    // File handling
-    // -------------------------------------------------------------------------
-
-    const handleFileSelected = function(file) {
-        // Validate extension.
-        const ext = file.name.split('.').pop().toLowerCase();
-        if (ACCEPTED_EXTS.indexOf(ext) === -1) {
-            Notification.addNotification({
-                message: strings.unsupportedFiletype.replace('{$a}', ext),
-                type: 'error'
-            });
-            return;
-        }
-
-        // Validate size.
-        if (file.size > MAX_FILE_BYTES) {
-            Notification.addNotification({
-                message: strings.fileTooLarge.replace('{$a}', formatBytes(file.size)),
-                type: 'error'
-            });
-            return;
-        }
-
-        // Show extracting state.
-        showDropzoneState('extracting', file.name);
-
-        // Upload to server for text extraction.
-        const formData = new FormData();
-        formData.append('action', 'extract_content');
-        formData.append('sesskey', CoreConfig.sesskey);
-        formData.append('file', file);
-
-        $.ajax({
-            url: CoreConfig.wwwroot + '/local/courseagent/ajax.php',
-            type: 'POST',
-            data: formData,
-            processData: false,
-            contentType: false,
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    extractedFileText = response.text;
-                    $('#upload-extracted-text').val(response.text);
-                    showDropzoneState('done', file.name, response.charcount);
-                } else {
-                    showDropzoneState('idle');
-                    Notification.addNotification({
-                        message: response.error || strings.couldNotExtract,
-                        type: 'error'
-                    });
-                }
-            },
-            error: function(xhr) {
-                showDropzoneState('idle');
-                let msg = strings.uploadFailed;
-                try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-                Notification.addNotification({ message: msg, type: 'error' });
-            }
-        });
-    };
-
-    const removeUploadedFile = function(e) {
-        e.stopPropagation();
-        extractedFileText = '';
-        $('#upload-extracted-text').val('');
-        $('#upload-file-input').val('');
-        showDropzoneState('idle');
-    };
-
-    /**
-     * Update the dropzone's visual state.
-     * @param {string} state  'idle' | 'extracting' | 'done'
-     * @param {string} [name] File name
-     * @param {number} [chars] Character count
-     */
-    const showDropzoneState = function(state, name, chars) {
-        const $inner = $('#upload-dropzone-inner');
-        const $info  = $('#upload-file-info');
-
-        if (state === 'idle') {
-            $inner.show();
-            $info.addClass('d-none');
-            $('#upload-dropzone').removeClass('has-file');
-        } else if (state === 'extracting') {
-            $inner.hide();
-            $info.removeClass('d-none');
-            $('#upload-filename').text(name);
-            $('#upload-charcount').html('<i class="fa fa-spinner fa-spin"></i> ' + strings.extractingText);
-            $('#upload-dropzone').addClass('has-file');
-        } else if (state === 'done') {
-            $inner.hide();
-            $info.removeClass('d-none');
-            $('#upload-filename').text(name);
-            $('#upload-charcount').html(
-                '<i class="fa fa-check-circle text-success"></i> ' +
-                strings.charactersExtracted.replace('{$a}', chars.toLocaleString())
-            );
-            $('#upload-dropzone').addClass('has-file');
-        }
-    };
-
-    const formatBytes = function(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        // Rebuild the custom listbox so it reflects the new model list.
+        CustomSelect.refresh('#ai-model');
     };
 
     // -------------------------------------------------------------------------
     // Course generation
     // -------------------------------------------------------------------------
+
+    // ── License error helpers ────────────────────────────────────────────────
+    const isLicenseError = function(response) {
+        return response && typeof response.error_code === 'string'
+            && response.error_code.indexOf('license_') === 0;
+    };
+
+    // Message for when the SaaS server is unreachable (transient / network error).
+    // Only shown when the user enabled a paid feature (H5P activity generation) for this run.
+    const serverConnectivityErrorHtml = function() {
+        return 'H5P activity generation needs the CourseAgent service, which can\'t be reached right now.'
+            + '<br><br>Turn off H5P activity generation to create your course with the free features,'
+            + ' or try again once connectivity is restored.';
+    };
+
+    // Show an error inside the loading modal rather than closing it.
+    const showModalError = function(html) {
+        if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+        $('#ca-loading-running').hide();
+        $('#ca-loading-error-msg').html(html);
+        $('#ca-loading-error').show();
+        $('#ca-loading-modal').show();
+        $('#ca-plan-modal').hide();
+        $('#btn-generate').prop('disabled', false);
+    };
+
+    // Close the loading modal and reset it back to the in-progress state for next use.
+    const dismissLoadingModal = function() {
+        $('#ca-loading-modal').fadeOut(200, function() {
+            $('#ca-loading-error').hide();
+            $('#ca-loading-running').show();
+        });
+    };
+
+    // Route a license validation failure into the in-modal error panel.
+    const renderLicenseError = function(response) {
+        let html;
+        if (response.is_transient) {
+            html = serverConnectivityErrorHtml();
+        } else {
+            html = '<strong>' + response.error + '</strong>';
+            if (strings.licenseFixInstruction) {
+                html += '<br>' + strings.licenseFixInstruction;
+            }
+            if (response.settings_url) {
+                html += ' <a href="' + response.settings_url + '" target="_blank" rel="noopener">'
+                      + (strings.licenseOpenSettings || 'Open plugin settings') + '</a>';
+            }
+        }
+        showModalError(html);
+    };
+
+    // Activity types included in the Starter plan (mirrors backend STARTER_ALLOWED_TYPES).
+    // Pro unlocks every type in H5P_LABELS below.
+    const STARTER_TYPES = [
+        'single_choice_set', 'multiple_choice', 'true_false', 'fill_in_blanks',
+        'drag_the_words', 'summary', 'quiz_question_set'
+    ];
 
     // H5P type display labels.
     const H5P_LABELS = {
@@ -349,14 +439,14 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
         const includeQuiz = $('#include-quiz').is(':checked');
         const includeAssignment = $('#include-assignment').is(':checked');
         const useEmojis   = $('#use-emojis').is(':checked');
-        const useSvg      = $('#use-svg').is(':checked');
+        const useDiagrams = $('#use-diagrams').is(':checked');
         const includeH5p  = config.hasSaasKey ? $('#include-h5p').is(':checked') : false;
         const h5pTypes    = includeH5p
             ? $('.h5p-type-check:checked').map(function() { return this.value; }).get().join(',')
             : '';
 
-        // Require topic OR uploaded file.
-        if (!topic && !extractedFileText) {
+        // Require topic.
+        if (!topic) {
             Notification.addNotification({ message: strings.pleaseEnterTopic, type: 'error' });
             return;
         }
@@ -377,14 +467,34 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             includequiz:       includeQuiz ? 1 : 0,
             includeassignment: includeAssignment ? 1 : 0,
             useemojis:         useEmojis ? 1 : 0,
-            usesvg:            useSvg ? 1 : 0,
+            usediagrams:       useDiagrams ? 1 : 0,
             includeh5p:        includeH5p ? 1 : 0,
             h5p_types:         h5pTypes,
             provider:          $('#ai-provider').val() || 0,
             model:             $('#ai-model').val() || '',
             sesskey:           CoreConfig.sesskey,
-            extracted_content: extractedFileText,
             custom_title:      customTitle,
+            // H5P min/max + which sub-options are active
+            h5p_per_section_enabled: $('#h5p-per-section-enabled').is(':checked') ? 1 : 0,
+            h5p_total_enabled:       $('#h5p-total-enabled').is(':checked') ? 1 : 0,
+            h5p_min_per_section: parseInt($('#h5p-min-per-section').val()) || 1,
+            h5p_max_per_section: parseInt($('#h5p-max-per-section').val()) || 3,
+            h5p_min_total:       parseInt($('#h5p-min-total').val()) || 1,
+            h5p_max_total:       parseInt($('#h5p-max-total').val()) || 6,
+            // Quiz min/max + which sub-options are active
+            quiz_per_section_enabled: $('#quiz-per-section-enabled').is(':checked') ? 1 : 0,
+            quiz_total_enabled:       $('#quiz-total-enabled').is(':checked') ? 1 : 0,
+            quiz_min_per_section: parseInt($('#quiz-min-per-section').val()) || 1,
+            quiz_max_per_section: parseInt($('#quiz-max-per-section').val()) || 3,
+            quiz_min_total:       parseInt($('#quiz-min-total').val()) || 1,
+            quiz_max_total:       parseInt($('#quiz-max-total').val()) || 6,
+            // Assignment min/max + which sub-options are active
+            assignment_per_section_enabled: $('#assignment-per-section-enabled').is(':checked') ? 1 : 0,
+            assignment_total_enabled:       $('#assignment-total-enabled').is(':checked') ? 1 : 0,
+            assignment_min_per_section: parseInt($('#assignment-min-per-section').val()) || 1,
+            assignment_max_per_section: parseInt($('#assignment-max-per-section').val()) || 2,
+            assignment_min_total:       parseInt($('#assignment-min-total').val()) || 1,
+            assignment_max_total:       parseInt($('#assignment-max-total').val()) || 4,
         };
 
         $('#btn-generate').prop('disabled', true);
@@ -394,7 +504,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             runPlanStep(formData, includeQuiz, includeAssignment);
         } else {
             // Free flow: generate directly.
-            showProgress(includeQuiz, includeAssignment);
+            showProgress(false);
             runGenerateStep(formData, false, includeQuiz, includeAssignment);
         }
     };
@@ -402,11 +512,8 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
     // ── Plan step (paid users only) ──────────────────────────────────────────
 
     const runPlanStep = function(formData, includeQuiz, includeAssignment) {
-        // Show spinner reusing the loading modal with a different heading.
-        $('#ca-loading-progress').css('width', '30%');
-        $('#ca-loading-percent').text('');
-        $('#ca-step-outline').find('.ca-step-label').text(strings.planningCourse || 'Planning your course...');
-        $('#ca-step-lessons, #ca-step-extras').hide();
+        // Reuse the loading modal, showing the planning stage as the status line.
+        $('#ca-loading-desc').text(strings.planningCourse || 'Planning your course...');
         $('#ca-loading-modal').show();
 
         const planData = Object.assign({}, formData, { action: 'plan' });
@@ -417,26 +524,22 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             data:     planData,
             dataType: 'json',
             success:  function(response) {
-                $('#ca-loading-modal').hide();
-                // Restore steps for later.
-                $('#ca-step-lessons, #ca-step-extras').show();
+                if (isLicenseError(response)) { renderLicenseError(response); return; }
                 if (response.success && response.plan) {
+                    $('#ca-loading-modal').hide();
                     showPlanModal(response.plan, formData, includeQuiz, includeAssignment);
                 } else {
-                    $('#btn-generate').prop('disabled', false);
-                    Notification.addNotification({
-                        message: response.error || strings.planFailed,
-                        type: 'error'
-                    });
+                    showModalError(response.error || strings.planFailed);
                 }
             },
             error: function(xhr) {
-                $('#ca-loading-modal').hide();
-                $('#ca-step-lessons, #ca-step-extras').show();
-                $('#btn-generate').prop('disabled', false);
-                let msg = strings.planError || strings.planFailed;
-                try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
-                Notification.addNotification({ message: msg, type: 'error' });
+                let html = xhr.status === 0
+                    ? serverConnectivityErrorHtml()
+                    : (strings.planError || strings.planFailed);
+                if (xhr.status !== 0) {
+                    try { html = JSON.parse(xhr.responseText).error || html; } catch (e) {}
+                }
+                showModalError(html);
             }
         });
     };
@@ -458,20 +561,30 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
 
             const $badges = $('<div class="mb-1"></div>');
             $badges.append('<span class="badge badge-primary mr-1">Lesson</span>');
-            if (sec.quiz) {
-                $badges.append('<span class="badge badge-info mr-1">Quiz</span>');
+
+            // Support the new count shape (quiz_count / assignment_count / h5p_types[]) and the older one.
+            const quizCount = (typeof sec.quiz_count === 'number') ? sec.quiz_count : (sec.quiz ? 1 : 0);
+            const assignCount = (typeof sec.assignment_count === 'number') ? sec.assignment_count : (sec.assignment ? 1 : 0);
+            const h5pTypes = Array.isArray(sec.h5p_types) ? sec.h5p_types : (sec.h5p_type ? [sec.h5p_type] : []);
+
+            if (quizCount > 0) {
+                $badges.append('<span class="badge badge-info mr-1">Quiz' + (quizCount > 1 ? ' × ' + quizCount : '') + '</span>');
             }
-            if (sec.assignment) {
-                $badges.append('<span class="badge badge-secondary mr-1">Assignment</span>');
+            if (assignCount > 0) {
+                $badges.append('<span class="badge badge-secondary mr-1">Assignment' + (assignCount > 1 ? ' × ' + assignCount : '') + '</span>');
             }
-            if (sec.h5p_type) {
-                var label = H5P_LABELS[sec.h5p_type] || ('H5P: ' + sec.h5p_type);
+            h5pTypes.forEach(function(t) {
+                var label = H5P_LABELS[t] || ('H5P: ' + t);
                 $badges.append('<span class="badge badge-success mr-1">' + label + '</span>');
+            });
+
+            if (formData.usediagrams) {
+                $badges.append('<span class="badge badge-warning mr-1">Diagram</span>');
             }
 
             $item.append($name).append($desc).append($badges);
 
-            if (sec.h5p_reason && sec.h5p_type) {
+            if (sec.h5p_reason && h5pTypes.length > 0) {
                 $item.append(
                     $('<div class="small text-muted font-italic mt-1"></div>').text(sec.h5p_reason)
                 );
@@ -483,7 +596,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
         // Wire buttons.
         $('#btn-plan-approve').off('click').on('click', function() {
             hidePlanModal();
-            showProgress(includeQuiz, includeAssignment, true);
+            showProgress(true);
             runGenerateStep(formData, true, includeQuiz, includeAssignment);
         });
         $('#btn-plan-edit').off('click').on('click', function() {
@@ -521,8 +634,16 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             dataType: 'json',
             success:  function(response) {
                 generateXhr = null;
+                if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
                 console.log('[CA DEBUG] Generate success response:', response);
+                if (isLicenseError(response)) {
+                    renderLicenseError(response);
+                    return;
+                }
                 if (response.success) {
+                    if (response.license_warning) {
+                        Notification.addNotification({ message: response.license_warning, type: 'warning' });
+                    }
                     var redirectUrl = CoreConfig.wwwroot + '/local/courseagent/preview.php';
                     console.log('[CA DEBUG] Redirecting to:', redirectUrl);
                     if (response.fallback_log && response.fallback_log.length > 0) {
@@ -532,25 +653,23 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
                     return;
                 }
                 console.warn('[CA DEBUG] generate failed:', response.error);
-                hideProgress();
-                $('#btn-generate').prop('disabled', false);
-                Notification.addNotification({
-                    message: response.error || strings.failedGenerate,
-                    type: 'error'
-                });
+                showModalError(response.error || strings.failedGenerate);
             },
             error: function(xhr) {
                 generateXhr = null;
                 if (xhr.status === 0 && xhr.statusText === 'abort') { return; }
-                hideProgress();
-                $('#btn-generate').prop('disabled', false);
-                let msg = strings.errorGenerating;
-                let parsed = null;
-                try { parsed = JSON.parse(xhr.responseText); msg = parsed.error || msg; } catch (e) {}
-                if (parsed && parsed.fallback_log && parsed.fallback_log.length > 0) {
-                    console.error('[CA FALLBACK LOG]', parsed.fallback_log);
+                let html;
+                if (xhr.status === 0) {
+                    html = serverConnectivityErrorHtml();
+                } else {
+                    html = strings.errorGenerating;
+                    let parsed = null;
+                    try { parsed = JSON.parse(xhr.responseText); html = parsed.error || html; } catch (e) {}
+                    if (parsed && parsed.fallback_log && parsed.fallback_log.length > 0) {
+                        console.error('[CA FALLBACK LOG]', parsed.fallback_log);
+                    }
                 }
-                Notification.addNotification({ message: msg, type: 'error' });
+                showModalError(html);
             }
         });
     };
@@ -560,7 +679,7 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
             generateXhr.abort();
             generateXhr = null;
         }
-        hideProgress();
+        dismissLoadingModal();
         $('#btn-generate').prop('disabled', false);
         Notification.addNotification({
             message: strings.generationCancelled,
@@ -572,76 +691,20 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
     // Utilities
     // -------------------------------------------------------------------------
 
-    const showProgress = function(includeQuiz, includeAssignment, usePlan) {
-        // Reset progress to 0.
-        var $bar = $('#ca-loading-progress');
-        var $pct = $('#ca-loading-percent');
-        var $extras = $('#ca-step-extras');
-
-        $bar.css('width', '0%');
-        $pct.text('0%');
-
-        // Configure extras step visibility and label.
-        if (!includeQuiz && !includeAssignment) {
-            $extras.hide();
-        } else {
-            $extras.show();
-            var label = '';
-            if (includeQuiz && includeAssignment) {
-                label = strings.addingQuizzesAssignments;
-            } else if (includeQuiz) {
-                label = strings.addingQuizzes;
-            } else {
-                label = strings.addingAssignments;
-            }
-            $extras.find('.ca-step-label').text(label);
-        }
-
-        // Reset step states.
-        var $steps = $('.ca-step:visible');
-        $steps.removeClass('ca-step-done ca-step-active').addClass('ca-step-pending');
-        $steps.find('.ca-step-bubble').html('');
-        $steps.eq(0).addClass('ca-step-active').removeClass('ca-step-pending');
-        $steps.eq(0).find('.ca-step-bubble').html('<i class="fa fa-hourglass-half" aria-hidden="true"></i>');
+    const showProgress = function(usePlan) {
+        // The progress bar is indeterminate (continuous stripe animation set in the markup):
+        // course generation is a single AI call with no real sub-progress to report. We only
+        // surface the real server stage as the status line, never a fake percentage or step.
+        var $desc = $('#ca-loading-desc');
 
         if (usePlan) {
             $('#ca-loading-title').text(strings.generatingFromPlan);
-            $('#ca-loading-desc').text(strings.generatingFromPlanDesc);
+            $desc.text(strings.generatingFromPlanDesc);
         }
 
         $('#ca-loading-modal').fadeIn(200);
 
-        // Fake step progression with random timing (2-5 seconds per step).
-        var currentStep = 0;
-        var totalSteps = $steps.length;
-
-        function moveToNextStep() {
-            if (currentStep < totalSteps) {
-                // Mark current step as done.
-                var $currentStep = $steps.eq(currentStep);
-                $currentStep.removeClass('ca-step-active ca-step-pending').addClass('ca-step-done');
-                $currentStep.find('.ca-step-bubble').html('<i class="fa fa-check" aria-hidden="true"></i>');
-
-                currentStep++;
-
-                // Move to next step if exists.
-                if (currentStep < totalSteps) {
-                    var $nextStep = $steps.eq(currentStep);
-                    $nextStep.removeClass('ca-step-pending ca-step-done').addClass('ca-step-active');
-                    $nextStep.find('.ca-step-bubble').html('<i class="fa fa-hourglass-half" aria-hidden="true"></i>');
-
-                    // Schedule next step with random delay (1-3 seconds).
-                    var randomDelay = Math.floor(Math.random() * 2000) + 1000;
-                    setTimeout(moveToNextStep, randomDelay);
-                }
-            }
-        }
-
-        // Track last known server progress for real progress bar.
-        var lastServerPct = 0;
-        var displayPct = 0;
-
-        // Poll server for real progress updates (for progress bar only).
+        // Poll the server for the real current stage and show it as the status line.
         progressTimer = setInterval(function() {
             $.ajax({
                 url:  CoreConfig.wwwroot + '/local/courseagent/ajax.php',
@@ -649,52 +712,20 @@ define(['jquery', 'core/ajax', 'core/notification', 'core/str', 'core/config'],
                 data: { action: 'get_progress', sesskey: CoreConfig.sesskey },
                 dataType: 'json',
                 success: function(resp) {
-                    if (resp.success && resp.progress) {
-                        var p = resp.progress;
-                        lastServerPct = p.percent || 0;
-
-                        // Update message if provided.
-                        if (p.message) {
-                            $('#ca-loading-modal .text-muted.mb-4').text(p.message);
-                        }
+                    if (resp.success && resp.progress && resp.progress.message) {
+                        $desc.text(resp.progress.message);
                     }
                 }
             });
-
-            // Smoothly animate display toward last server percentage.
-            var target = Math.max(lastServerPct, displayPct);
-            if (displayPct < target) {
-                displayPct = Math.min(target, displayPct + Math.max(0.5, (target - displayPct) * 0.15));
-            } else if (displayPct < 90) {
-                // Slowly creep forward when waiting for next server update.
-                displayPct = Math.min(90, displayPct + 0.2);
-            }
-            var rounded = Math.round(displayPct);
-            $bar.css('width', rounded + '%');
-            $pct.text(rounded + '%');
-        }, 500);
-
-        // Start fake step progression.
-        var initialDelay = Math.floor(Math.random() * 2000) + 1000;
-        setTimeout(moveToNextStep, initialDelay);
+        }, 1000);
     };
 
     const hideProgress = function() {
-        // Stop the timer.
         if (progressTimer) {
             clearInterval(progressTimer);
             progressTimer = null;
         }
-        // Animate to 100% before closing.
-        var $bar = $('#ca-loading-progress');
-        var $pct = $('#ca-loading-percent');
-
-        $bar.css('width', '100%');
-        $pct.text('100%');
-
-        setTimeout(function() {
-            $('#ca-loading-modal').fadeOut(200);
-        }, 400);
+        $('#ca-loading-modal').fadeOut(200);
     };
 
     return { init: init };

@@ -44,11 +44,15 @@ H5P package lazily on first view — no pre-processing step needed at creation t
 course publishes successfully regardless. Check `h5p_warnings` in the publish response if  
 debugging missing H5P modules.
 
-## Paid vs Free User Branching
+## Standalone vs SaaS-connected Branching
 
 `config.hasSaasKey` (bool, from `$jsconfig` in `index.php`) controls JS branching in  
-`generateCourseOutline()`. Paid path calls `runPlanStep()` first; free path skips directly  
-to `runGenerateStep()`. When adding new form options, check both paths still work.
+`generateCourseOutline()`.
+
+- **SaaS-connected path** (`hasSaasKey = true`): calls `runPlanStep()` first (AI generates course outline for teacher approval), then `runGenerateStep()`. Enables H5P activities, RAG, and the outline-approval modal.
+- **Standalone path** (`hasSaasKey = false`): skips directly to `runGenerateStep()` using the plugin's own AI provider. Generates quizzes, assignments, and lessons only.
+
+When adding new form options, verify both paths still work.
 
 ## Critical Gotcha — Missing `break` in ajax.php Switch
 

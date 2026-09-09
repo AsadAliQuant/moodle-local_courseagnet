@@ -25,9 +25,9 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$plugin->version   = 2026051801; // Add OpenRouter preset; quiz question population confirmed.
+$plugin->version   = 2026060400; // Multi-activity counts: dual-range sliders + per-section/total sub-toggles drive generation.
 $plugin->requires  = 2024100805; // Requires Moodle 5.0+ (compatible with 5.1).
 $plugin->component = 'local_courseagent'; // Full name of the plugin.
 $plugin->maturity  = MATURITY_STABLE;
-$plugin->release   = '1.2.3';
+$plugin->release   = '1.2.7';
 $plugin->supported = [500, 501]; // Supported from Moodle 5.0 to 5.1.

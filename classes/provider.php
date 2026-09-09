@@ -21,11 +21,16 @@ namespace local_courseagent;
  * AI Provider management class.
  * Handles CRUD operations, encryption, and API calls for AI providers.
  *
+ * Class name is lowercase to match the file name (provider.php). Moodle's
+ * autoloader maps `local_courseagent\Provider` to `classes/Provider.php`
+ * literally, breaking on case-sensitive filesystems (Linux).
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class Provider
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class provider
 {
     /** @var string Encryption key for API keys */
     private static $cipher = 'aes-256-cbc';

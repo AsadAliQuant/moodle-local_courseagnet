@@ -332,9 +332,17 @@ if ($form) {
             var p = presets[key];
             if (!p) { return; }
 
-            // Fill text fields.
+            // Fill text fields. Overwrite the name on every preset click, but
+            // leave a name the admin typed themselves untouched (only replace it
+            // if it's empty or still equals a previously-applied preset name).
             var nameEl = document.getElementById('id_name');
-            if (nameEl && !nameEl.value) { nameEl.value = p.name; }
+            if (nameEl) {
+                var lastPreset = nameEl.getAttribute('data-preset-name') || '';
+                if (!nameEl.value || nameEl.value === lastPreset) {
+                    nameEl.value = p.name;
+                    nameEl.setAttribute('data-preset-name', p.name);
+                }
+            }
 
             var baseurlEl = document.getElementById('id_baseurl');
             if (baseurlEl) { baseurlEl.value = p.baseurl; }

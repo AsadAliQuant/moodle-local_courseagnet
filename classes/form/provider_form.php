@@ -15,6 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <https://www.gnu.org/licenses/>.
 
+// phpcs:disable PSR1.Files.SideEffects -- Moodle requires bootstrap (MOODLE_INTERNAL, require_once)
 namespace local_courseagent\form;
 
 defined('MOODLE_INTERNAL') || die();
@@ -24,11 +25,16 @@ require_once($CFG->libdir . '/formslib.php');
 /**
  * Provider add/edit form - Standard Moodle settings style.
  *
+ * Class name is snake_case to match the file name (provider_form.php). Moodle's
+ * autoloader maps `local_courseagent\form\ProviderForm` to `classes/form/ProviderForm.php`
+ * literally, breaking on case-sensitive filesystems (Linux).
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class ProviderForm extends \moodleform
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class provider_form extends \moodleform
 {
     /**
      * Define the form fields for provider add/edit.
@@ -154,6 +160,7 @@ class ProviderForm extends \moodleform
         $removelabel = get_string('provider_model_remove', 'local_courseagent');
         $nomodelsmsg = get_string('no_models_yet', 'local_courseagent');
         $defaultmodel = get_string('default_model', 'local_courseagent');
+        $defaultbadge = get_string('provider_default', 'local_courseagent');
         $modellabel = get_string('model_label', 'local_courseagent');
         $editlabel = get_string('edit_title', 'local_courseagent');
         $moveuplabel = get_string('move_up', 'local_courseagent');
@@ -237,7 +244,7 @@ class ProviderForm extends \moodleform
             var badge = document.createElement('span');
             badge.className = 'badge badge-primary badge-pill mr-2';
             badge.title = idx === 0 ? '{$defaultmodel}' : '{$modellabel}'.replace('{\$a}', (idx + 1));
-            badge.textContent = idx === 0 ? 'â˜…' : (idx + 1);
+            badge.textContent = idx === 0 ? '{$defaultbadge}' : (idx + 1);
 
             // Editable model name.
             var nameEl = document.createElement('span');

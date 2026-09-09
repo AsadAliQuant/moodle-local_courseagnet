@@ -22,18 +22,28 @@ use core\hook\output\before_footer_html_generation;
 /**
  * Output hook callbacks for local_courseagent plugin.
  *
+ * Class name is lowercase to match the file name (output.php). Moodle's
+ * autoloader resolves `local_courseagent\hook\Output` to `classes/hook/Output.php`
+ * literally, so case-sensitive filesystems (and stricter Moodle 5.x checks) fail
+ * unless class and file names match exactly.
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class Output
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class output
 {
     /**
      * Injects "Create with AI" AMD module on my/courses.php before JS is finalized.
      *
+     * Method name is snake_case to match the callback registered in db/hooks.php.
+     * Moodle's hook manager validates callbacks with strict (case-sensitive) method-name lookup.
+     *
      * @param before_footer_html_generation $hook
      */
-    public static function beforeFooter(before_footer_html_generation $hook): void
+    // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+    public static function before_footer(before_footer_html_generation $hook): void
     {
         global $PAGE;
 

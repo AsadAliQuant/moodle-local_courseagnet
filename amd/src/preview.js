@@ -15,6 +15,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
     let state = {
         currentSectionIndex: 0,
         currentTab: 'content',
+        currentItemIndex: 0,   // which quiz/assignment within the section is being viewed
         expandedSections: new Set([0]),
         chatMessages: [],
         quickActions: [],
@@ -67,10 +68,34 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             }
         }
         if (config.courseData) {
+            normalizeSections(config.courseData);
             $('#ca-course-title').text(config.courseData.title || strings.untitledCourse);
             renderAll();
         }
         setupEventListeners();
+    };
+
+    /**
+     * Coerce each section's quizzes / assignments / H5P into arrays (the multi-activity shape),
+     * tolerating the older singular fields. Keep section.quiz / section.assignment pointing at the
+     * first array item so the conversational edit flow keeps working on item 0.
+     * @param {Object} courseData
+     */
+    const normalizeSections = function(courseData) {
+        (courseData.sections || []).forEach(function(section) {
+            if (!Array.isArray(section.quizzes)) {
+                section.quizzes = (section.quiz && section.quiz.questions && section.quiz.questions.length)
+                    ? [section.quiz] : [];
+            }
+            if (!Array.isArray(section.assignments)) {
+                section.assignments = section.assignment ? [section.assignment] : [];
+            }
+            if (!Array.isArray(section.h5p)) {
+                section.h5p = section.h5p_type ? [section.h5p_type] : [];
+            }
+            section.quiz = section.quizzes[0] || null;
+            section.assignment = section.assignments[0] || null;
+        });
     };
 
     // Track which item is currently selected for editing.
@@ -120,28 +145,35 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                     html += '</a>';
                 }
 
-                // Quiz item.
-                if (section.quiz && section.quiz.questions && section.quiz.questions.length > 0) {
-                    var isQuizActive = state.currentSectionIndex === index && state.currentTab === 'quiz';
+                // Quiz items (one node per quiz in the section).
+                (section.quizzes || []).forEach(function(quiz, qIdx) {
+                    if (!quiz || !quiz.questions || quiz.questions.length === 0) { return; }
+                    var isQuizActive = state.currentSectionIndex === index && state.currentTab === 'quiz'
+                        && state.currentItemIndex === qIdx;
+                    var quizLabel = strings.quizCount.replace('{$a}', quiz.questions.length);
+                    if (section.quizzes.length > 1) { quizLabel += ' (' + (qIdx + 1) + ')'; }
                     html += '<a href="#" class="ca-tree-item' + (isQuizActive ? ' is-active' : '') + '" ' +
-                            'data-section="' + index + '" data-tab="quiz">';
+                            'data-section="' + index + '" data-tab="quiz" data-item="' + qIdx + '">';
                     html += '<i class="fa fa-question-circle ca-tree-item-icon"></i>';
-                    html += '<span class="ca-tree-item-label">' + strings.quizCount.replace('{$a}', section.quiz.questions.length) + '</span>';
+                    html += '<span class="ca-tree-item-label">' + quizLabel + '</span>';
                     html += '</a>';
-                }
+                });
 
-                // Assignment item.
-                if (section.assignment) {
-                    var isAssignActive = state.currentSectionIndex === index && state.currentTab === 'assignment';
+                // Assignment items (one node per assignment in the section).
+                (section.assignments || []).forEach(function(assign, aIdx) {
+                    if (!assign) { return; }
+                    var isAssignActive = state.currentSectionIndex === index && state.currentTab === 'assignment'
+                        && state.currentItemIndex === aIdx;
+                    var assignLabel = strings.assignmentLabel + (section.assignments.length > 1 ? ' (' + (aIdx + 1) + ')' : '');
                     html += '<a href="#" class="ca-tree-item' + (isAssignActive ? ' is-active' : '') + '" ' +
-                            'data-section="' + index + '" data-tab="assignment">';
+                            'data-section="' + index + '" data-tab="assignment" data-item="' + aIdx + '">';
                     html += '<i class="fa fa-tasks ca-tree-item-icon"></i>';
-                    html += '<span class="ca-tree-item-label">' + strings.assignmentLabel + '</span>';
+                    html += '<span class="ca-tree-item-label">' + assignLabel + '</span>';
                     html += '</a>';
-                }
+                });
 
-                // H5P activity item.
-                if (config.courseData._include_h5p && section.h5p_type) {
+                // H5P activity items (one node per chosen type in the section).
+                if (config.courseData._include_h5p && section.h5p && section.h5p.length > 0) {
                     var h5pLabels = {
                         'single_choice_set':  'H5P: Single Choice',
                         'summary':            'H5P: Summary',
@@ -161,14 +193,17 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                         'chart':              'H5P: Chart',
                         'timeline':           'H5P: Timeline'
                     };
-                    var h5pLabel = h5pLabels[section.h5p_type] || 'H5P Activity';
-                    html += '<div class="ca-tree-item ca-tree-h5p">';
-                    html += '<i class="fa fa-cubes ca-tree-item-icon"></i>';
-                    html += '<span class="badge badge-success mr-1">' + h5pLabel + '</span>';
+                    section.h5p.forEach(function(h5ptype) {
+                        var h5pLabel = h5pLabels[h5ptype] || 'H5P Activity';
+                        html += '<div class="ca-tree-item ca-tree-h5p">';
+                        html += '<i class="fa fa-cubes ca-tree-item-icon"></i>';
+                        html += '<span class="badge badge-success mr-1">' + h5pLabel + '</span>';
+                        html += '</div>';
+                    });
                     if (section.h5p_reason) {
-                        html += '<small class="text-muted">' + escapeHtml(section.h5p_reason) + '</small>';
+                        html += '<div class="ca-tree-item ca-tree-h5p"><small class="text-muted">'
+                            + escapeHtml(section.h5p_reason) + '</small></div>';
                     }
-                    html += '</div>';
                 }
 
                 html += '</div>';
@@ -186,11 +221,6 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         var section = sections[state.currentSectionIndex];
         if (!section) { return; }
 
-        var hasLesson = !!section.lesson;
-        var hasQuiz = !!(section.quiz && section.quiz.questions && section.quiz.questions.length > 0);
-        var hasAssignment = !!section.assignment;
-
-        
         var html = '';
 
         html += '<div class="ca-main-content">';
@@ -200,9 +230,9 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         if (state.currentTab === 'content') {
             html += renderLessonContent(section);
         } else if (state.currentTab === 'quiz') {
-            html += renderQuizContent(section);
+            html += renderQuizContent(section, state.currentItemIndex);
         } else if (state.currentTab === 'assignment') {
-            html += renderAssignmentContent(section);
+            html += renderAssignmentContent(section, state.currentItemIndex);
         }
 
         html += '</div>';
@@ -234,16 +264,21 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         return html;
     };
 
-    const renderQuizContent = function(section) {
+    const renderQuizContent = function(section, itemIdx) {
+        itemIdx = itemIdx || 0;
+        var quizzes = section.quizzes || (section.quiz ? [section.quiz] : []);
+        var quiz = quizzes[itemIdx];
         var html = '';
-        if (!section.quiz || !section.quiz.questions || section.quiz.questions.length === 0) {
+        if (!quiz || !quiz.questions || quiz.questions.length === 0) {
             html += '<p class="text-muted">' + strings.noQuiz + '</p>';
             return html;
         }
 
-            html += '<h1 class="ca-content-title">' + strings.quizCount.replace('{$a}', escapeHtml(section.name)) + '</h1>';
+        var quizTitle = strings.quizCount.replace('{$a}', escapeHtml(section.name));
+        if (quizzes.length > 1) { quizTitle += ' (' + (itemIdx + 1) + ')'; }
+        html += '<h1 class="ca-content-title">' + quizTitle + '</h1>';
 
-        section.quiz.questions.forEach(function(q, qi) {
+        quiz.questions.forEach(function(q, qi) {
             var correctIdx = (typeof q.correct_answer === 'number') ? q.correct_answer : -1;
             html += '<div class="ca-quiz-question" data-question-index="' + qi + '">';
             html += '<div class="ca-quiz-question-header">';
@@ -273,15 +308,19 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         return html;
     };
 
-    const renderAssignmentContent = function(section) {
+    const renderAssignmentContent = function(section, itemIdx) {
+        itemIdx = itemIdx || 0;
+        var assignments = section.assignments || (section.assignment ? [section.assignment] : []);
+        var a = assignments[itemIdx];
         var html = '';
-        if (!section.assignment) {
+        if (!a) {
             html += '<p class="text-muted">' + strings.noAssignment + '</p>';
             return html;
         }
 
-        var a = section.assignment;
-        html += '<h1 class="ca-content-title">' + strings.assignmentLabel + ': ' + escapeHtml(a.title || section.name) + '</h1>';
+        var assignTitle = strings.assignmentLabel + ': ' + escapeHtml(a.title || section.name);
+        if (assignments.length > 1) { assignTitle += ' (' + (itemIdx + 1) + ')'; }
+        html += '<h1 class="ca-content-title">' + assignTitle + '</h1>';
 
         if (a.description) {
             html += '<p class="ca-content-lead">' + escapeHtml(a.description) + '</p>';
@@ -292,7 +331,7 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             html += '<h3 class="ca-info-box-title"><i class="fa fa-lightbulb"></i> ' + strings.instructions + '</h3>';
             html += '<ol class="ca-assignment-instructions">';
             a.instructions.forEach(function(inst) {
-                html += '<li>' + escapeHtml(inst) + '</li>';
+                html += '<li>' + formatInstruction(inst) + '</li>';
             });
             html += '</ol>';
             html += '</div>';
@@ -370,14 +409,21 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             var section = sections[sectionIdx];
             if (!section) { return courseData; }
 
+            // The conversational edit flow operates on the FIRST quiz/assignment of a section
+            // (item 0). Keep the singular alias and the arrays (used for rendering + publish) in sync.
+            if (!Array.isArray(section.quizzes)) { section.quizzes = section.quiz ? [section.quiz] : []; }
+            if (!Array.isArray(section.assignments)) { section.assignments = section.assignment ? [section.assignment] : []; }
+
             if (targetType === 'lesson') {
                 section.lesson = delta.data;
                 state.currentSectionIndex = sectionIdx;
                 state.currentTab = 'content';
             } else if (targetType === 'quiz') {
                 section.quiz = delta.data;
+                section.quizzes[0] = delta.data;
                 state.currentSectionIndex = sectionIdx;
                 state.currentTab = 'quiz';
+                state.currentItemIndex = 0;
             } else if (targetType === 'question') {
                 if (!section.quiz) { section.quiz = { name: 'Quiz', questions: [] }; }
                 if (op === 'add') {
@@ -387,12 +433,16 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
                 } else {
                     section.quiz.questions[delta.question_index] = delta.data;
                 }
+                section.quizzes[0] = section.quiz;
                 state.currentSectionIndex = sectionIdx;
                 state.currentTab = 'quiz';
+                state.currentItemIndex = 0;
             } else if (targetType === 'assignment') {
                 section.assignment = delta.data;
+                section.assignments[0] = delta.data;
                 state.currentSectionIndex = sectionIdx;
                 state.currentTab = 'assignment';
+                state.currentItemIndex = 0;
             }
         }
 
@@ -559,10 +609,13 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             })
             .on('click.courseagent', '.ca-tree-item', function(e) {
                 e.preventDefault();
-                var sectionIdx = parseInt($(this).data('section'), 10);
                 var tab = $(this).data('tab');
+                if (!tab) { return; }   // non-navigable nodes (e.g. H5P badges)
+                var sectionIdx = parseInt($(this).data('section'), 10);
+                var itemIdx = parseInt($(this).data('item'), 10);
                 state.currentSectionIndex = sectionIdx;
                 state.currentTab = tab;
+                state.currentItemIndex = isNaN(itemIdx) ? 0 : itemIdx;
                 renderSidebar();
                 renderMain();
             });
@@ -649,6 +702,24 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             });
     };
 
+    /* ── License error helpers ── */
+    const isLicenseError = function(response) {
+        return response && typeof response.error_code === 'string'
+            && response.error_code.indexOf('license_') === 0;
+    };
+
+    const renderLicenseError = function(response) {
+        let html = '<strong>' + response.error + '</strong>';
+        if (strings.licenseFixInstruction) {
+            html += '<br>' + strings.licenseFixInstruction;
+        }
+        if (response.settings_url) {
+            html += ' <a href="' + response.settings_url + '" target="_blank" rel="noopener">'
+                  + (strings.licenseOpenSettings || 'Open plugin settings') + '</a>';
+        }
+        Notification.addNotification({ message: html, type: 'error' });
+    };
+
     /* ── Publish ── */
     const publishCourse = function() {
         if (!config.courseData) {
@@ -669,8 +740,16 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
             dataType:    'json',
             success:     function(response) {
                 $('#btn-publish').prop('disabled', false).html('<i class="fa fa-upload fa-fw"></i> ' + strings.publishToMoodle);
+                if (isLicenseError(response)) {
+                    renderLicenseError(response);
+                    return;
+                }
                 if (response.success) {
                     Notification.addNotification({ message: strings.coursePublished, type: 'success' });
+                    // Soft-fail warning (SaaS unreachable during publish — H5P skipped).
+                    if (response.license_warning) {
+                        Notification.addNotification({ message: response.license_warning, type: 'warning' });
+                    }
                     if (response.h5p_warnings && response.h5p_warnings.length > 0) {
                         response.h5p_warnings.forEach(function(warning) {
                             Notification.addNotification({ message: warning, type: 'warning' });
@@ -697,6 +776,36 @@ define(['jquery', 'core/ajax', 'core/notification'], function($, Ajax, Notificat
         if (typeof text !== 'string') { return String(text || ''); }
         const map = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' };
         return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+    };
+
+    // Escape HTML first, then convert inline markdown (**bold**, `code`) on the safe string.
+    const inlineMarkdown = function(text) {
+        return escapeHtml(text)
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>');
+    };
+
+    // Clean one AI instruction string into <li> inner HTML: strip its own leading
+    // number, render bold/code, and turn "-" lines into a nested bullet list.
+    const formatInstruction = function(inst) {
+        if (typeof inst !== 'string') { inst = String(inst || ''); }
+        const lines = inst.replace(/\r/g, '').split('\n');
+        let main = '';
+        const bullets = [];
+        lines.forEach(function(line) {
+            if (/^\s*[-•]\s+/.test(line) || /^\s*\*\s+/.test(line)) {
+                bullets.push(inlineMarkdown(line.replace(/^\s*[-•*]\s+/, '')));
+            } else if (line.trim() !== '') {
+                // First non-bullet line is the step; strip a leading ordinal like "1. " or "2) ".
+                const cleaned = main === '' ? line.replace(/^\s*\d+[.)]\s+/, '') : line;
+                main += (main === '' ? '' : ' ') + inlineMarkdown(cleaned.trim());
+            }
+        });
+        let out = main;
+        if (bullets.length > 0) {
+            out += '<ul><li>' + bullets.join('</li><li>') + '</li></ul>';
+        }
+        return out;
     };
 
     return { init: init };

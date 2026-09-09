@@ -23,18 +23,28 @@ use core\hook\navigation\primary_extend;
  * Hook callbacks for local_courseagent plugin.
  * Adds navigation link to primary navigation for users with course creation capability.
  *
+ * Class name is lowercase to match the file name (navigation.php). Moodle's
+ * autoloader resolves `local_courseagent\hook\Navigation` to `classes/hook/Navigation.php`
+ * literally, so case-sensitive filesystems (and stricter Moodle 5.x checks) fail
+ * unless class and file names match exactly.
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class Navigation
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class navigation
 {
     /**
      * Add Course Agent link to the primary top navbar (Moodle 5.x).
      *
+     * Method name is snake_case to match the callback registered in db/hooks.php.
+     * Moodle's hook manager validates callbacks with strict (case-sensitive) method-name lookup.
+     *
      * @param primary_extend $hook
      */
-    public static function extendPrimaryNavigation(primary_extend $hook): void
+    // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+    public static function extend_primary_navigation(primary_extend $hook): void
     {
         // Check capability - only show for teachers, managers, admins.
         $context = \context_system::instance();

@@ -27,6 +27,7 @@
 // phpcs:disable moodle.Commenting.InlineComment.NotCapital
 // phpcs:disable moodle.Commenting.InlineComment.InvalidEndChar
 // phpcs:disable moodle.Strings.ForbiddenStrings.Found
+// phpcs:disable PSR1.Files.SideEffects -- Moodle requires bootstrap (MOODLE_INTERNAL, require_once)
 namespace local_courseagent;
 
 defined('MOODLE_INTERNAL') || die();
@@ -39,14 +40,168 @@ require_once($CFG->dirroot . '/course/externallib.php');
 /**
  * Course Agent API class - handles course generation and publishing.
  *
+ * Class name is lowercase to match the file name (api.php). Moodle's autoloader
+ * resolves `local_courseagent\Api` to `classes/Api.php` literally, so a PascalCase
+ * class name in a lowercase file fails on case-sensitive filesystems (Linux).
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-class Api
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class api
 {
     /** @var string[] Non-fatal H5P generation warnings collected during publishCourse(). */
     private $h5pwarnings = [];
+
+    /**
+     * Normalize the raw activity-count params (sent by the course form) into a tidy
+     * per-activity struct. Each activity has an independently-toggleable "per section"
+     * range and "total across course" cap.
+     *
+     * @param array $raw Raw params keyed like 'quiz_min_per_section', 'quiz_total_enabled', ...
+     * @return array{quiz: array, assignment: array, h5p: array}
+     */
+    public static function resolveCounts(array $raw)
+    {
+        $int = function ($k, $d) use ($raw) {
+            return isset($raw[$k]) ? max(0, (int) $raw[$k]) : $d;
+        };
+        $bool = function ($k) use ($raw) {
+            return !empty($raw[$k]);
+        };
+        $one = function ($p) use ($int, $bool) {
+            $permin = max(1, $int($p . '_min_per_section', 1));
+            $permax = max($permin, $int($p . '_max_per_section', $permin));
+            $totmin = max(1, $int($p . '_min_total', 1));
+            $totmax = max($totmin, $int($p . '_max_total', $totmin));
+            return [
+                'per_section_enabled' => $bool($p . '_per_section_enabled'),
+                'per_min'             => $permin,
+                'per_max'             => $permax,
+                'total_enabled'       => $bool($p . '_total_enabled'),
+                'total_min'           => $totmin,
+                'total_max'           => $totmax,
+            ];
+        };
+        return [
+            'quiz'       => $one('quiz'),
+            'assignment' => $one('assignment'),
+            'h5p'        => $one('h5p'),
+        ];
+    }
+
+    /**
+     * Build a one-line natural-language count instruction for a single activity, used in prompts.
+     * Returns '' when the activity is disabled.
+     *
+     * @param string $label   Display label, e.g. 'Quizzes'
+     * @param array  $cfg     One activity's resolved count struct
+     * @param bool   $enabled Whether the parent activity toggle is on
+     * @return string
+     */
+    private function countInstruction($label, $cfg, $enabled)
+    {
+        if (!$enabled) {
+            return '';
+        }
+        $persec = !empty($cfg['per_section_enabled']);
+        $total  = !empty($cfg['total_enabled']);
+        if (!$persec && !$total) {
+            return "- {$label}: exactly 1 per section.\n";
+        }
+        $parts = [];
+        if ($persec) {
+            $parts[] = ($cfg['per_min'] === $cfg['per_max'])
+                ? "exactly {$cfg['per_min']} per section"
+                : "between {$cfg['per_min']} and {$cfg['per_max']} per section";
+        }
+        if ($total) {
+            $parts[] = ($cfg['total_min'] === $cfg['total_max'])
+                ? "exactly {$cfg['total_min']} in total across the whole course"
+                : "between {$cfg['total_min']} and {$cfg['total_max']} in total across the whole course";
+        }
+        $extra = ($persec && $total)
+            ? ' If these two limits conflict, the course total is the hard cap.'
+            : '';
+        return "- {$label}: " . implode(', and ', $parts) . ".{$extra}\n";
+    }
+
+    /**
+     * The hard per-section ceiling for an activity (used by the publish layer to clamp
+     * however many items the AI returned). Falls back to a generous default when the
+     * activity's "per section" sub-option is off.
+     *
+     * @param array $cfg One activity's resolved count struct
+     * @return int
+     */
+    private function perSectionCap($cfg)
+    {
+        if (!empty($cfg['per_section_enabled'])) {
+            return max(1, (int) $cfg['per_max']);
+        }
+        // Per-section off but total on → let the total cap govern; allow up to the total max per section.
+        if (!empty($cfg['total_enabled'])) {
+            return max(1, (int) $cfg['total_max']);
+        }
+        return 1;
+    }
+
+    /**
+     * Coerce a counts struct (which may have survived a JSON/session round-trip as a stdClass)
+     * back into a plain array-of-arrays, filling any gaps with defaults.
+     *
+     * @param array|object|null $counts
+     * @return array{quiz: array, assignment: array, h5p: array}
+     */
+    private function countsToArray($counts)
+    {
+        $defaults = self::resolveCounts([]);
+        $out = [];
+        foreach (['quiz', 'assignment', 'h5p'] as $a) {
+            $cfg = is_object($counts) ? ($counts->$a ?? null)
+                 : (is_array($counts) ? ($counts[$a] ?? null) : null);
+            $out[$a] = $cfg ? array_merge($defaults[$a], (array) $cfg) : $defaults[$a];
+        }
+        return $out;
+    }
+
+    /**
+     * Normalize a section so quizzes / assignments / H5P are always arrays, coercing the
+     * older singular shapes (quiz, assignment, h5p_type) the AI or saved sessions may use.
+     *
+     * @param \stdClass $section
+     * @return \stdClass
+     */
+    private function normalizeSection($section)
+    {
+        // Quizzes → array of quiz objects that actually have questions.
+        if (!isset($section->quizzes) || !is_array($section->quizzes)) {
+            $section->quizzes = (!empty($section->quiz) && !empty($section->quiz->questions))
+                ? [$section->quiz] : [];
+        }
+        $section->quizzes = array_values(array_filter($section->quizzes, function ($q) {
+            return !empty($q->questions);
+        }));
+
+        // Assignments → array of assignment objects.
+        if (!isset($section->assignments) || !is_array($section->assignments)) {
+            $section->assignments = !empty($section->assignment) ? [$section->assignment] : [];
+        }
+        $section->assignments = array_values(array_filter($section->assignments, function ($a) {
+            return !empty($a);
+        }));
+
+        // H5P → array of type strings (the plan stamps this; fall back to the single legacy type).
+        if (!isset($section->h5p) || !is_array($section->h5p)) {
+            $section->h5p = !empty($section->h5p_type) ? [$section->h5p_type] : [];
+        }
+        $section->h5p = array_values(array_filter($section->h5p, function ($t) {
+            return is_string($t) && $t !== '';
+        }));
+
+        return $section;
+    }
 
     /**
      * Generate course outline using AI.
@@ -71,10 +226,13 @@ class Api
         $uploadedcontent = null,
         $customtitle = null,
         $useemojis = false,
-        $usesvg = false,
-        $plan = null
+        $usediagrams = false,
+        $plan = null,
+        $counts = []
     ) {
         global $USER;
+
+        $counts = !empty($counts) ? $counts : self::resolveCounts([]);
 
         // Build prompt for AI.
         $prompt = $this->buildGenerationPrompt(
@@ -86,11 +244,12 @@ class Api
             $uploadedcontent,
             $customtitle,
             $useemojis,
-            $usesvg,
-            $plan
+            $usediagrams,
+            $plan,
+            $counts
         );
 
-        $this->writeProgress(1, 15, 'Building course outline...');
+        $this->writeProgress(1, 15, 'Generating your course with AI — this can take a few minutes...');
 
         // Build grouped list: [{providerid, providername, models:[...]}]
         // Order: requested/default provider first, then other enabled providers.
@@ -122,7 +281,7 @@ class Api
                         $response = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $rawresponse);
                         // Escape bare CR/LF/TAB inside JSON string values.
                         ini_set('pcre.backtrack_limit', 10000000);
-                        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"/s', function ($m) {
+                        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"\/s', function ($m) {
                             $inner = $m[1];
                             $inner = preg_replace('/(?<!\\\\)\r/', '\\r', $inner);
                             $inner = preg_replace('/(?<!\\\\)\n/', '\\n', $inner);
@@ -166,15 +325,40 @@ class Api
 
                         foreach ($coursedata->sections as $i => $section) {
                             if (!empty($section->name)) {
-                                $section->name = preg_replace('/^Section\s+\d+[:.]\s*/i', '', $section->name);
+                                $section->name = preg_replace('/^Section\s+\d+[:.\s]*/i', '', $section->name);
                             }
-                            // Stamp plan decisions onto each section.
+                            // Stamp plan decisions onto each section. The plan may use the new
+                            // count fields (quiz_count / assignment_count / h5p_types[]) or the
+                            // older boolean/single-type shape — support both.
                             if ($plan && isset($plan->sections[$i])) {
                                 $plansec = $plan->sections[$i];
-                                $section->quiz_planned       = $plansec->quiz       ?? null;
-                                $section->assignment_planned = $plansec->assignment ?? null;
-                                $section->h5p_type           = $plansec->h5p_type   ?? null;
+                                if (isset($plansec->quiz_count)) {
+                                    $section->quiz_count_planned = (int) $plansec->quiz_count;
+                                } elseif (isset($plansec->quiz)) {
+                                    $section->quiz_count_planned = !empty($plansec->quiz) ? 1 : 0;
+                                }
+                                if (isset($plansec->assignment_count)) {
+                                    $section->assignment_count_planned = (int) $plansec->assignment_count;
+                                } elseif (isset($plansec->assignment)) {
+                                    $section->assignment_count_planned = !empty($plansec->assignment) ? 1 : 0;
+                                }
+                                if (isset($plansec->h5p_types) && is_array($plansec->h5p_types)) {
+                                    $section->h5p = array_values($plansec->h5p_types);
+                                } elseif (!empty($plansec->h5p_type)) {
+                                    $section->h5p = [$plansec->h5p_type];
+                                }
+                                // Keep the legacy single-type field populated for any older readers.
+                                if (!empty($section->h5p) && is_array($section->h5p)) {
+                                    $section->h5p_type = $section->h5p[0];
+                                }
                             }
+
+                            // Ensure quizzes/assignments/h5p are arrays, then point the legacy
+                            // singular fields at the FIRST item (same object handle) so the
+                            // preview's conversational edit flow keeps working on item 0.
+                            $section = $this->normalizeSection($section);
+                            $section->quiz       = $section->quizzes[0] ?? null;
+                            $section->assignment = $section->assignments[0] ?? null;
                         }
 
                         return $coursedata;
@@ -196,14 +380,14 @@ class Api
                     }
                 }
             }
-            // $ratelimited=true â†’ foreach continues to next provider automatically.
+            // $ratelimited=true → foreach continues to next provider automatically.
         }
 
         throw new \Exception('All AI providers exhausted after retries. Last error: ' . $lasterror);
     }
 
     /**
-     * Generate a lightweight course plan â€” structure only, no lesson content or quiz questions.
+     * Generate a lightweight course plan — structure only, no lesson content or quiz questions.
      * Used by paid users (saas_api_key set) before full generation. The plan contains per-section
      * curriculum decisions: which activities make sense and which H5P type fits best.
      *
@@ -230,8 +414,10 @@ class Api
         $model = null,
         $uploadedcontent = null,
         $customtitle = null,
-        $h5ptypes = ''
+        $h5ptypes = '',
+        $counts = []
     ) {
+        $counts = !empty($counts) ? $counts : self::resolveCounts([]);
         $allvalidtypes = [
             'single_choice_set', 'summary', 'drag_the_words',
             'multiple_choice', 'true_false', 'fill_in_blanks',
@@ -259,7 +445,8 @@ class Api
             $includeh5p,
             $uploadedcontent,
             $customtitle,
-            $allowedtypes
+            $allowedtypes,
+            $counts
         );
 
         $providers  = $this->buildFallbackProviders($providerid, $model);
@@ -296,7 +483,7 @@ class Api
 
                         foreach ($plandata->sections as $sec) {
                             if (!empty($sec->name)) {
-                                $sec->name = preg_replace('/^Section\s+\d+[:.]\s*/i', '', $sec->name);
+                                $sec->name = preg_replace('/^Section\s+\d+[:.\s]*/i', '', $sec->name);
                             }
                         }
 
@@ -335,8 +522,10 @@ class Api
         $includeh5p,
         $uploadedcontent = null,
         $customtitle = null,
-        $allowedtypes = []
+        $allowedtypes = [],
+        $counts = []
     ) {
+        $counts = !empty($counts) ? $counts : self::resolveCounts([]);
         $topicline = !empty($topic) ? "Topic: {$topic}" : 'Topic: (derive from source document)';
         $titleline = !empty($customtitle) ? "Custom title requested: \"{$customtitle}\"" : '';
 
@@ -350,6 +539,14 @@ class Api
         $enabledlist  .= '- Quiz (MCQ): ' . ($includequiz ? 'enabled' : 'disabled') . "\n";
         $enabledlist  .= '- Assignment: ' . ($includeassignment ? 'enabled' : 'disabled') . "\n";
         $enabledlist  .= '- H5P Interactive Activity: ' . ($includeh5p ? 'enabled' : 'disabled') . "\n";
+
+        // How many of each activity the teacher wants (per-section range and/or whole-course cap).
+        $countrules  = $this->countInstruction('Quizzes', $counts['quiz'], $includequiz);
+        $countrules .= $this->countInstruction('Assignments', $counts['assignment'], $includeassignment);
+        $countrules .= $this->countInstruction('H5P interactive activities', $counts['h5p'], $includeh5p);
+        $countsection = $countrules !== ''
+            ? "\nHOW MANY OF EACH ACTIVITY (decide a count per section within these limits):\n" . $countrules
+            : '';
 
         $h5pinstruction = '';
         if ($includeh5p) {
@@ -388,7 +585,7 @@ class Api
             : '"title": "Descriptive course title"';
 
         $prompt  = "You are an expert curriculum designer.\n";
-        $prompt .= "Plan the structure of a Moodle course. Return JSON ONLY â€” no markdown, no explanation.\n\n";
+        $prompt .= "Plan the structure of a Moodle course. Return JSON ONLY — no markdown, no explanation.\n\n";
         $prompt .= "{$topicline}\n";
         if ($titleline) {
             $prompt .= "{$titleline}\n";
@@ -397,9 +594,10 @@ class Api
         $prompt .= "Number of sections: EXACTLY {$numsections}\n";
         $prompt .= $contextsection;
         $prompt .= "\n\nACTIVITIES ENABLED BY THE TEACHER:\n" . $enabledlist;
-        $prompt .= "\nFor EACH section, decide which ENABLED activities make sense given that section's content.\n";
-        $prompt .= "A section doesn't need every enabled activity â€” use judgment. ";
-        $prompt .= "E.g. an intro section may not need an assignment; a vocab-heavy section suits drag-the-words.\n";
+        $prompt .= $countsection;
+        $prompt .= "\nFor EACH section, decide HOW MANY of each enabled activity make sense given that section's content, staying within the limits above.\n";
+        $prompt .= "A section doesn't need the maximum of every activity — use judgment, but respect the per-section range and never exceed the whole-course total.\n";
+        $prompt .= "E.g. an intro section may need 0 assignments; a vocab-heavy section suits drag-the-words.\n";
         $prompt .= $h5pinstruction;
         $prompt .= "\nDo NOT generate lesson content, quiz questions, or assignment instructions.\n";
         $prompt .= "Return ONLY this JSON structure (repeat the section object exactly {$numsections} times):\n\n";
@@ -412,16 +610,16 @@ class Api
         $prompt .= '      "description": "2-3 sentence section overview",' . "\n";
         $prompt .= '      "lesson": true,' . "\n";
         if ($includequiz) {
-            $prompt .= '      "quiz": true,' . "  // true if quiz fits this section, false otherwise\n";
+            $prompt .= '      "quiz_count": 1,' . "  // how many quizzes this section should have (0 if none fits)\n";
         }
         if ($includeassignment) {
-            $prompt .= '      "assignment": false,' . "  // true if assignment fits this section, false otherwise\n";
+            $prompt .= '      "assignment_count": 0,' . "  // how many assignments this section should have (0 if none fits)\n";
         }
         if ($includeh5p) {
             $firsttype = !empty($typelist) ? $typelist[0] : 'single_choice_set';
-            $othertypes = !empty($typelist) ? implode(', ', array_slice($typelist, 1)) . ', null' : 'null';
-            $prompt .= '      "h5p_type": "' . $firsttype . '",' . "  // or {$othertypes}\n";
-            $prompt .= '      "h5p_reason": "One sentence explaining why this type fits"' . "\n";
+            $othertypes = !empty($typelist) ? implode(', ', $typelist) : 'single_choice_set';
+            $prompt .= '      "h5p_types": ["' . $firsttype . '"],' . "  // array of chosen types (one entry per H5P activity for this section); pick from: {$othertypes}; use [] for none\n";
+            $prompt .= '      "h5p_reason": "One sentence explaining the chosen H5P type(s)"' . "\n";
         }
         $prompt .= "    }\n";
         $prompt .= "  ]\n";
@@ -518,9 +716,11 @@ class Api
         $uploadedcontent = null,
         $customtitle = null,
         $useemojis = false,
-        $usesvg = false,
-        $plan = null
+        $usediagrams = false,
+        $plan = null,
+        $counts = []
     ) {
+        $counts = !empty($counts) ? $counts : self::resolveCounts([]);
         $maxsections = get_config('local_courseagent', 'max_sections') ?: 8;
         $maxquiz     = get_config('local_courseagent', 'max_quiz_questions') ?: 7;
 
@@ -543,44 +743,50 @@ class Api
         // Topic line.
         $topicline = !empty($topic) ? "Topic: {$topic}" : 'Topic: (derive from the source document above)';
 
-        $quizcount    = min($maxquiz, 5); // Default 5 questions per section.
-        $quizinstruct = $includequiz
-            ? "Yes â€” generate exactly {$quizcount} MCQ questions per section"
-            : 'No';
+        $quizcount = min($maxquiz, 5); // Questions inside EACH quiz (the slider controls how many quizzes, not questions).
+
+        // Count rules: how many quizzes / assignments per section and/or across the course.
+        $countrules  = $this->countInstruction('Quizzes', $counts['quiz'], $includequiz);
+        $countrules .= $this->countInstruction('Assignments', $counts['assignment'], $includeassignment);
 
         $prompt  = "You are a senior instructional designer with expertise in creating comprehensive, university-level online courses.\n";
-        $prompt .= "Your task is to create a COMPLETE, DETAILED course â€” not a brief outline.\n\n";
+        $prompt .= "Your task is to create a COMPLETE, DETAILED course — not a brief outline.\n\n";
         $prompt .= "{$topicline}\n";
         $prompt .= "Level: {$level}\n";
         $prompt .= "Number of Sections: {$numsections} (maximum {$maxsections})\n";
-        $prompt .= "Include Quizzes: {$quizinstruct}\n";
-        $prompt .= "Include Assignments: " . ($includeassignment ? 'Yes' : 'No') . "\n";
+        $prompt .= 'Include Quizzes: ' . ($includequiz ? 'Yes' : 'No') . "\n";
+        $prompt .= 'Include Assignments: ' . ($includeassignment ? 'Yes' : 'No') . "\n";
+        if ($countrules !== '') {
+            $prompt .= "\nHOW MANY OF EACH ACTIVITY (each section's array must hold this many items):\n" . $countrules;
+        }
         $prompt .= $contextsection;
 
-        // Approved course plan â€” AI must follow this structure exactly.
+        // Approved course plan — AI must follow this structure exactly.
         if (!empty($plan) && !empty($plan->sections)) {
-            $prompt .= "\n\n== APPROVED COURSE PLAN â€” FOLLOW THIS STRUCTURE EXACTLY ==\n";
+            $prompt .= "\n\n== APPROVED COURSE PLAN — FOLLOW THIS STRUCTURE EXACTLY ==\n";
             $prompt .= "The teacher has approved the following plan. ";
             $prompt .= "Use the EXACT section names and generate content for ONLY the activities listed per section.\n\n";
             foreach ($plan->sections as $si => $plansec) {
                 $snum = $si + 1;
                 $secname = $plansec->name ?? "Section {$snum}";
+                // Support both the new count fields and the older boolean shape.
+                $qc = isset($plansec->quiz_count) ? (int) $plansec->quiz_count
+                    : (!empty($plansec->quiz) ? 1 : 0);
+                $ac = isset($plansec->assignment_count) ? (int) $plansec->assignment_count
+                    : (!empty($plansec->assignment) ? 1 : 0);
                 $activities = ['Lesson (always)'];
-                if (!empty($plansec->quiz)) {
-                    $activities[] = 'Quiz (MCQ)';
+                if ($qc > 0) {
+                    $activities[] = $qc . ' Quiz' . ($qc > 1 ? 'zes' : '');
                 }
-                if (!empty($plansec->assignment)) {
-                    $activities[] = 'Assignment';
-                }
-                if (!empty($plansec->h5p_type)) {
-                    $activities[] = 'H5P: ' . $plansec->h5p_type;
+                if ($ac > 0) {
+                    $activities[] = $ac . ' Assignment' . ($ac > 1 ? 's' : '');
                 }
                 $prompt .= "  Section {$snum}: \"{$secname}\"\n";
                 $prompt .= "    Activities: " . implode(', ', $activities) . "\n";
             }
             $prompt .= "\nDo NOT rename, reorder, or add sections beyond this plan. ";
-            $prompt .= "Only generate quiz questions for sections where Quiz is listed. ";
-            $prompt .= "Only generate assignments for sections where Assignment is listed.\n";
+            $prompt .= "Put exactly the listed number of quizzes in each section's \"quizzes\" array, ";
+            $prompt .= "and the listed number of assignments in each section's \"assignments\" array.\n";
         }
 
         $prompt .= "\n\n== CRITICAL CONTENT REQUIREMENTS ==\n";
@@ -593,29 +799,154 @@ class Api
         $prompt .= "The content_html field MUST contain well-structured HTML with ";
         $prompt .= "<h2>, <h3>, <p>, <ul>, <ol>, <strong>, <em>, <blockquote>, ";
         $prompt .= "and <pre><code> tags as appropriate.\n";
-        $prompt .= "Each lesson MUST be at minimum 800 words â€” comprehensive enough for a student to learn the topic without any other resources.\n\n";
+        $prompt .= "Each lesson MUST be at minimum 800 words — comprehensive enough for a student to learn the topic without any other resources.\n\n";
 
         // Emoji styling instructions.
         if ($useemojis) {
             $prompt .= "== EMOJI ENHANCEMENTS ==\n";
             $prompt .= "Sprinkle relevant emojis throughout the content to make it engaging and visually appealing.\n";
             $prompt .= "Use emojis in headings, bullet points, and key concepts where appropriate.\n";
-            $prompt .= "Examples: ðŸ“š for learning, ðŸ’¡ for tips, ðŸŽ¯ for objectives, âš ï¸ for warnings, âœ… for checklists, ðŸ” for examples.\n\n";
+            $prompt .= "Examples: 📚 for learning, 💡 for tips, 🎯 for objectives, ⚠️ for warnings, ✅ for checklists, 📝 for examples.\n\n";
         }
 
-        // SVG diagram instructions.
-        if ($usesvg) {
-            $prompt .= "== SVG DIAGRAMS ==\n";
-            $prompt .= "Where visual explanations would help understanding, include simple inline SVG diagrams.\n";
-            $prompt .= "Embed SVG code directly in the HTML content using <svg> tags.\n";
-            $prompt .= "Create simple diagrams like: flowcharts, process diagrams, concept maps, comparison charts, or illustrative icons.\n";
-            $prompt .= "Keep SVGs clean, minimalist, and directly relevant to the concept being explained.\n";
-            $prompt .= "Use proper viewBox and reasonable dimensions (width='300-600' height='200-400').\n\n";
+        // Mermaid diagram instructions.
+        if ($usediagrams) {
+            $prompt .= "== MERMAID DIAGRAMS (v11.15 — strict syntax required) ==\n";
+            $prompt .= "Where a visual diagram genuinely helps understanding, include ONE Mermaid.js diagram in the section content_html.\n";
+            $prompt .= "Embed ONLY as a raw <div class=\"mermaid\"> block. NEVER add ```mermaid fences inside the div.\n\n";
+
+            $prompt .= "DIAGRAM TYPE SELECTION — choose the single best match for the content:\n\n";
+
+            $prompt .= "TIER 1 — STABLE (prefer these, lowest syntax error risk):\n";
+            $prompt .= "  flowchart TD|LR|BT|RL  — processes, workflows, decision trees, pipelines\n";
+            $prompt .= "  sequenceDiagram         — step-by-step interactions between systems or people\n";
+            $prompt .= "  classDiagram            — OOP class structures, data models, inheritance\n";
+            $prompt .= "  stateDiagram-v2         — state machines, lifecycle flows, mode transitions\n";
+            $prompt .= "  erDiagram               — database schemas, entity relationships\n";
+            $prompt .= "  pie title X             — proportional breakdowns, percentages\n";
+            $prompt .= "  gantt                   — project schedules, timelines, phases\n";
+            $prompt .= "  gitGraph                — branching strategies, Git workflows\n";
+            $prompt .= "  mindmap                 — concept maps, topic hierarchies (indentation-based)\n";
+            $prompt .= "  timeline                — historical sequences, chronological events\n\n";
+
+            $prompt .= "TIER 2 — SUPPORTED (use when content is a strong match):\n";
+            $prompt .= "  journey                 — user experience flows, step-by-step journeys with scores\n";
+            $prompt .= "  quadrantChart           — 2x2 prioritisation matrices, effort/impact grids\n";
+            $prompt .= "  requirementDiagram      — system requirements, traceability matrices\n";
+            $prompt .= "  xychart-beta            — bar or line charts with numeric axes\n";
+            $prompt .= "  sankey-beta             — flow/resource distribution between nodes\n";
+            $prompt .= "  C4Context               — high-level software architecture (persons, systems)\n\n";
+
+            $prompt .= "TIER 3 — EXPERIMENTAL (only when a perfect fit, syntax is strict and fragile):\n";
+            $prompt .= "  block-beta              — visual block/layer diagrams with explicit layout\n";
+            $prompt .= "  packet-beta             — network packet structures, binary field layouts\n";
+            $prompt .= "  kanban                  — task boards with columns and cards\n";
+            $prompt .= "  architecture-beta       — infrastructure diagrams with services and groups\n";
+            $prompt .= "  zenuml                  — UML sequence diagrams with code-like syntax\n\n";
+
+            $prompt .= "SYNTAX EXAMPLES for the error-prone types:\n\n";
+
+            $prompt .= "gantt — MUST include dateFormat before any section:\n";
+            $prompt .= '<div class="mermaid">gantt' . "\n";
+            $prompt .= "    title Project Plan\n";
+            $prompt .= "    dateFormat YYYY-MM-DD\n";
+            $prompt .= "    section Phase 1\n";
+            $prompt .= "    Task A :a1, 2024-01-01, 7d\n";
+            $prompt .= "    Task B :a2, after a1, 5d\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "mindmap — indentation defines hierarchy, NO arrows or brackets on root:\n";
+            $prompt .= '<div class="mermaid">mindmap' . "\n";
+            $prompt .= "  root((Main Topic))\n";
+            $prompt .= "    Branch A\n";
+            $prompt .= "      Leaf 1\n";
+            $prompt .= "      Leaf 2\n";
+            $prompt .= "    Branch B\n";
+            $prompt .= "      Leaf 3\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "timeline — section keyword required, each event colon-separated on its own line:\n";
+            $prompt .= '<div class="mermaid">timeline' . "\n";
+            $prompt .= "    title History of Technology\n";
+            $prompt .= "    section 1990s\n";
+            $prompt .= "        1991 : World Wide Web\n";
+            $prompt .= "        1995 : JavaScript\n";
+            $prompt .= "    section 2000s\n";
+            $prompt .= "        2004 : Facebook\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "xychart-beta — axis values must be arrays or ranges, title in double-quotes:\n";
+            $prompt .= '<div class="mermaid">xychart-beta' . "\n";
+            $prompt .= '    title "Quarterly Revenue"' . "\n";
+            $prompt .= '    x-axis ["Q1", "Q2", "Q3", "Q4"]' . "\n";
+            $prompt .= "    y-axis 0 --> 100\n";
+            $prompt .= "    bar [40, 65, 55, 80]\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "quadrantChart — axis labels and [x,y] point syntax required:\n";
+            $prompt .= '<div class="mermaid">quadrantChart' . "\n";
+            $prompt .= '    title "Effort vs Impact"' . "\n";
+            $prompt .= "    x-axis Low Effort --> High Effort\n";
+            $prompt .= "    y-axis Low Impact --> High Impact\n";
+            $prompt .= '    Task A: [0.3, 0.8]' . "\n";
+            $prompt .= '    Task B: [0.7, 0.4]' . "\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "sankey-beta — CSV rows: Source,Target,Value (no spaces around commas):\n";
+            $prompt .= '<div class="mermaid">sankey-beta' . "\n";
+            $prompt .= "    Revenue,Operations,40\n";
+            $prompt .= "    Revenue,Marketing,30\n";
+            $prompt .= "    Revenue,RnD,30\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "kanban — column IDs with quoted labels, cards nested inside:\n";
+            $prompt .= '<div class="mermaid">kanban' . "\n";
+            $prompt .= '    todo["To Do"]' . "\n";
+            $prompt .= '        id1["Write tests"]' . "\n";
+            $prompt .= '        id2["Update docs"]' . "\n";
+            $prompt .= '    doing["In Progress"]' . "\n";
+            $prompt .= '        id3["Build API"]' . "\n";
+            $prompt .= '    done["Done"]' . "\n";
+            $prompt .= '        id4["Design mockups"]' . "\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "journey — title + section required, each task: label: score: Actor:\n";
+            $prompt .= '<div class="mermaid">journey' . "\n";
+            $prompt .= "    title User Onboarding\n";
+            $prompt .= "    section Sign Up\n";
+            $prompt .= "        Visit landing page: 5: User\n";
+            $prompt .= "        Fill in form: 3: User\n";
+            $prompt .= "        Confirm email: 4: User, System\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "C4Context — use only Person(), System(), SystemDb(), Rel() — no custom shapes:\n";
+            $prompt .= '<div class="mermaid">C4Context' . "\n";
+            $prompt .= '    Person(user, "Customer", "Uses the app")' . "\n";
+            $prompt .= '    System(app, "Web App", "Core platform")' . "\n";
+            $prompt .= '    SystemDb(db, "Database", "Stores data")' . "\n";
+            $prompt .= '    Rel(user, app, "Uses")' . "\n";
+            $prompt .= '    Rel(app, db, "Reads/Writes")' . "\n";
+            $prompt .= "</div>\n\n";
+
+            $prompt .= "UNIVERSAL SYNTAX RULES — any violation causes a broken diagram:\n";
+            $prompt .= "  1. LABEL QUOTING: wrap labels in double-quotes if they contain comma , colon : parentheses () semicolon ; slash / ampersand & or dash -\n";
+            $prompt .= "     Correct: A[\"Process data\"] -->|\"if valid\"| B[\"Save record\"]\n";
+            $prompt .= "     Wrong:   A[Process data] -->|if valid| B[Save record]\n";
+            $prompt .= "  2. NO markdown code fences (``` or ```mermaid) inside the <div class=\"mermaid\"> block.\n";
+            $prompt .= "  3. NO HTML tags (<br> <b> <i> etc.) inside any label or node.\n";
+            $prompt .= "  4. NO semicolons at line endings.\n";
+            $prompt .= "  5. sequenceDiagram: participant names with spaces MUST be aliased: participant WS as \"Web Server\"\n";
+            $prompt .= "  6. classDiagram: method/attribute lines use +/-/# prefix with no spaces before the name.\n";
+            $prompt .= "  7. C4Context: only use Person(), System(), SystemDb(), Container(), Rel() shapes.\n";
+            $prompt .= "  8. Max 10-12 nodes/items/rows. Deep nesting or large datasets break the parser.\n";
+            $prompt .= "  9. Prefer Tier 1 types. Only use Tier 2/3 when genuinely a better fit for the content.\n";
+            $prompt .= "  10. ONE diagram per section maximum. Skip entirely if no diagram genuinely aids the content.\n\n";
         }
 
         if ($includequiz) {
             $prompt .= "== MCQ QUIZ REQUIREMENTS ==\n";
-            $prompt .= "For EVERY section generate exactly {$quizcount} multiple-choice questions that test deep understanding.\n";
+            $prompt .= "Each section's \"quizzes\" array holds the number of quizzes set in the count rules above (it may be empty for a section).\n";
+            $prompt .= "Each quiz MUST contain exactly {$quizcount} multiple-choice questions that test deep understanding. When a section has more than one quiz, each must cover DIFFERENT material.\n";
             $prompt .= "Each question MUST have exactly 4 answer options (A, B, C, D).\n";
             $prompt .= "correct_answer is the 0-based index of the correct option (0=A, 1=B, 2=C, 3=D).\n";
             $prompt .= "Mix question types: factual recall, conceptual understanding, and application.\n\n";
@@ -623,24 +954,25 @@ class Api
 
         if ($includeassignment) {
             $prompt .= "== ASSIGNMENT REQUIREMENTS ==\n";
-            $prompt .= "For EVERY section, include a practical assignment that reinforces the lesson content.\n";
-            $prompt .= "The assignment should have clear instructions, a descriptive title, and an estimated word count.\n";
+            $prompt .= "Each section's \"assignments\" array holds the number of assignments set in the count rules above (it may be empty for a section).\n";
+            $prompt .= "Each assignment reinforces the lesson content and has clear instructions, a descriptive title, and an estimated word count. When a section has more than one assignment, each must tackle a DIFFERENT task.\n";
+            $prompt .= "Each instruction step must be plain text — do NOT number the steps yourself and do NOT use markdown symbols like ** or backticks.\n";
             $prompt .= "Do NOT reference any external files, datasets, CSVs, PDFs, or downloadable resources in assignment instructions. All tasks must be completable by the student using only their own knowledge and publicly available information.\n\n";
         }
 
         $prompt .= "== CRITICAL SECTION COUNT REQUIREMENT ==\n";
         $prompt .= "You MUST generate EXACTLY {$numsections} sections.\n";
-        $prompt .= "The 'sections' array in your JSON response MUST contain precisely {$numsections} section objects â€” no more, no less.\n";
+        $prompt .= "The 'sections' array in your JSON response MUST contain precisely {$numsections} section objects — no more, no less.\n";
         $prompt .= "Do not stop early. Do not return fewer sections than requested.\n\n";
 
-        $prompt .= "Return ONLY a valid JSON object â€” no markdown fences, no extra text before or after.\n";
+        $prompt .= "Return ONLY a valid JSON object — no markdown fences, no extra text before or after.\n";
         $prompt .= "Use this EXACT JSON structure (repeat the section template exactly {$numsections} times):\n";
         $prompt .= "{\n";
         $prompt .= "  {$titleinstruction},\n";
         $prompt .= '  "summary": "A rich 2-3 sentence course description explaining what students will learn and why it matters",' . "\n";
         $prompt .= '  "sections": [' . "\n";
         $prompt .= "    {\n";
-        $prompt .= '      "name": "Clear descriptive title â€” do NOT start with Section N: or any numbering",' . "\n";
+        $prompt .= '      "name": "Clear descriptive title — do NOT start with Section N: or any numbering",' . "\n";
         $prompt .= '      "description": "2-3 sentence section overview",' . "\n";
         $prompt .= "      \"lesson\": {\n";
         $prompt .= '        "summary": "1-2 sentence lesson intro shown to students before they open the lesson",' . "\n";
@@ -651,40 +983,44 @@ class Api
         $prompt .= "      }";
 
         if ($includequiz) {
-            $prompt .= ",\n      \"quiz\": {\n";
-            $prompt .= "        \"name\": \"Section Quiz\",\n";
-            $prompt .= '        "questions": [' . "\n";
-            $prompt .= "          {\n";
-            $prompt .= '            "question": "Full question text ending with a question mark?",' . "\n";
-            $prompt .= '            "options": ["Option A text", "Option B text", "Option C text", "Option D text"],' . "\n";
-            $prompt .= '            "correct_answer": 0,' . "  // 0-based index\n";
-            $prompt .= '            "explanation": "Brief explanation of why this answer is correct",' . "\n";
-            $prompt .= '            "points": 1' . "\n";
-            $prompt .= "          }\n";
-            $prompt .= "        ]\n";
-            $prompt .= "      }";
+            $prompt .= ",\n      \"quizzes\": [\n";
+            $prompt .= "        {\n";
+            $prompt .= "          \"name\": \"Section Quiz\",\n";
+            $prompt .= '          "questions": [' . "\n";
+            $prompt .= "            {\n";
+            $prompt .= '              "question": "Full question text ending with a question mark?",' . "\n";
+            $prompt .= '              "options": ["Option A text", "Option B text", "Option C text", "Option D text"],' . "\n";
+            $prompt .= '              "correct_answer": 0,' . "  // 0-based index\n";
+            $prompt .= '              "explanation": "Brief explanation of why this answer is correct",' . "\n";
+            $prompt .= '              "points": 1' . "\n";
+            $prompt .= "            }\n";
+            $prompt .= "          ]\n";
+            $prompt .= "        }\n";
+            $prompt .= "      ]";
         }
 
         if ($includeassignment) {
-            $prompt .= ",\n      \"assignment\": {\n";
-            $prompt .= '        "title": "Descriptive assignment title (e.g., \'Research and Analysis Essay\' or \'Code Implementation Task\')",' . "\n";
-            $prompt .= '        "description": "2-3 sentence description of what the student needs to do and the learning objective",' . "\n";
-            $prompt .= '        "instructions": ["Clear step 1 the student should follow", "Step 2 with specific requirements", "Step 3 with submission guidelines"],' . "\n";
-            $prompt .= '        "word_count": 500' . "\n";
-            $prompt .= "      }";
+            $prompt .= ",\n      \"assignments\": [\n";
+            $prompt .= "        {\n";
+            $prompt .= '          "title": "Descriptive assignment title (e.g., \'Research and Analysis Essay\' or \'Code Implementation Task\')",' . "\n";
+            $prompt .= '          "description": "2-3 sentence description of what the student needs to do and the learning objective",' . "\n";
+            $prompt .= '          "instructions": ["Clear first step the student should follow (plain text, no leading number, no markdown)", "Second step with specific requirements", "Final step with submission guidelines"],' . "\n";
+            $prompt .= '          "word_count": 500' . "\n";
+            $prompt .= "        }\n";
+            $prompt .= "      ]";
         }
 
         $prompt .= "\n    }\n  ]\n}";
 
-        $prompt .= "\n\nREMEMBER: Every lesson content_html must be thorough â€” at least 800 words of educational content.";
-        $prompt .= " Every quiz must have exactly {$quizcount} MCQ questions if quizzes are enabled.";
-        if ($includeassignment) {
-            $prompt .= " Every section must include a complete assignment with title, description, and step-by-step instructions.";
-        }
-        $prompt .= " Return valid JSON only â€” no surrounding markdown.";
+        $prompt .= "\n\nREMEMBER: Every lesson content_html must be thorough — at least 800 words of educational content.";
+        $prompt .= " \"quizzes\" and \"assignments\" are ARRAYS — put the number of items set by the count rules in each (an empty array [] is allowed for a section).";
+        $prompt .= " Every quiz must have exactly {$quizcount} MCQ questions.";
+        $prompt .= " Return valid JSON only — no surrounding markdown.";
 
         return $prompt;
     }
+
+
 
     /**
      * Publish course to Moodle.
@@ -728,12 +1064,26 @@ class Api
         $course   = $DB->get_record('course', ['id' => $courseid], '*', MUST_EXIST);
 
         // Create ALL required sections upfront (Moodle 4.0+ no longer uses
-        // the numsections courseformatoption â€” sections must be created explicitly).
+        // the numsections courseformatoption — sections must be created explicitly).
         \course_create_sections_if_missing($course, range(0, $numsections));
+
+        // Activity-count rules (per-section caps + course-wide totals). Carried from the form via
+        // ajax; defaults applied when absent (e.g. an older saved session).
+        $counts        = $this->countsToArray($coursedata->_counts ?? null);
+        $quizcfg       = $counts['quiz'];
+        $assigncfg     = $counts['assignment'];
+        $h5pcfg        = $counts['h5p'];
+        $quiztotalcap  = !empty($quizcfg['total_enabled'])   ? (int) $quizcfg['total_max']   : PHP_INT_MAX;
+        $assigntotcap  = !empty($assigncfg['total_enabled']) ? (int) $assigncfg['total_max'] : PHP_INT_MAX;
+        $h5ptotalcap   = !empty($h5pcfg['total_enabled'])    ? (int) $h5pcfg['total_max']    : PHP_INT_MAX;
+        $quizmade      = 0;
+        $assignmade    = 0;
+        $h5pmade       = 0;
 
         // Populate sections and add modules.
         foreach ($coursedata->sections as $index => $section) {
             $sectionnum = $index + 1;
+            $section = $this->normalizeSection($section);
 
             // Update section name and summary directly in DB.
             $DB->set_field(
@@ -756,31 +1106,47 @@ class Api
                 $this->createLessonPage($course, $sectionnum, $section);
             }
 
-            // Create quiz â€” respect plan decision if present.
-            $doquiz = isset($section->quiz_planned)
-                ? (bool) $section->quiz_planned
-                : (!empty($section->quiz) && !empty($section->quiz->questions));
-            if ($doquiz && !empty($section->quiz) && !empty($section->quiz->questions)) {
-                $this->createQuiz($course, $sectionnum, $section);
+            // Create quizzes — one per item in the section's quizzes[] array, clamped to the
+            // per-section cap and the course-wide total cap.
+            $quizcap = $this->perSectionCap($quizcfg);
+            $quizthissection = 0;
+            $multiquiz = count($section->quizzes) > 1;
+            foreach ($section->quizzes as $quiz) {
+                if ($quizmade >= $quiztotalcap || $quizthissection >= $quizcap) {
+                    break;
+                }
+                if (empty($quiz->questions)) {
+                    continue;
+                }
+                $this->createQuiz(
+                    $course,
+                    $sectionnum,
+                    $section->name ?? ('Section ' . $sectionnum),
+                    $quiz,
+                    $multiquiz ? ($quizthissection + 1) : 0
+                );
+                $quizthissection++;
+                $quizmade++;
             }
 
-            // Create assignment â€” respect plan decision if present.
-            $doassignment = isset($section->assignment_planned)
-                ? (bool) $section->assignment_planned
-                : !empty($section->assignment);
-            if ($doassignment && !empty($section->assignment)) {
-                debugging('Course Agent: Creating assignment for section ' . $sectionnum .
-                          ' data: ' . json_encode($section->assignment), DEBUG_DEVELOPER);
-                $this->createAssignment($course, $sectionnum, $section->assignment);
-            } elseif (!$doassignment) {
-                debugging('Course Agent: Assignment skipped for section ' . $sectionnum . ' (plan decision)', DEBUG_DEVELOPER);
-            } else {
-                debugging('Course Agent: No assignment data for section ' . $sectionnum .
-                          ' section data: ' . json_encode($section), DEBUG_DEVELOPER);
+            // Create assignments — one per item in the section's assignments[] array, clamped.
+            $assigncap = $this->perSectionCap($assigncfg);
+            $assignthissection = 0;
+            foreach ($section->assignments as $assignment) {
+                if ($assignmade >= $assigntotcap || $assignthissection >= $assigncap) {
+                    break;
+                }
+                if (empty($assignment)) {
+                    continue;
+                }
+                $this->createAssignment($course, $sectionnum, $assignment);
+                $assignthissection++;
+                $assignmade++;
             }
 
-            // Create H5P activity via SaaS (optional, non-fatal).
-            if (!empty($coursedata->_include_h5p)) {
+            // Create H5P activities via CourseAgent API (optional, non-fatal) — one per chosen
+            // type in the section's h5p[] array, clamped. Each call is a billable SaaS request.
+            if (!empty($coursedata->_include_h5p) && !empty($section->h5p)) {
                 $saaskey = get_config('local_courseagent', 'saas_api_key') ?: '';
                 $saasurl = defined('COURSEAGENT_SAAS_URL')
                     ? rtrim(COURSEAGENT_SAAS_URL, '/')
@@ -804,7 +1170,16 @@ class Api
                             $allowedtypes = $parsed;
                         }
                     }
-                    $this->createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes);
+                    $h5pcap = $this->perSectionCap($h5pcfg);
+                    $h5pthissection = 0;
+                    foreach ($section->h5p as $h5ptype) {
+                        if ($h5pmade >= $h5ptotalcap || $h5pthissection >= $h5pcap) {
+                            break;
+                        }
+                        $this->createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes, $h5ptype);
+                        $h5pthissection++;
+                        $h5pmade++;
+                    }
                 }
             }
         }
@@ -827,7 +1202,7 @@ class Api
 
     /**
      * Create a stub course_modules row so we have a cmid BEFORE calling
-     * {module}_add_instance() â€” Moodle's own module libs (e.g. page_add_instance)
+     * {module}_add_instance() — Moodle's own module libs (e.g. page_add_instance)
      * expect $data->coursemodule to already exist and update it themselves.
      *
      * @param  stdClass $course
@@ -873,7 +1248,7 @@ class Api
         require_once($CFG->dirroot . '/mod/page/lib.php');
         require_once($CFG->dirroot . '/lib/resourcelib.php');
 
-        // Must create the CM stub first â€” page_add_instance() uses $data->coursemodule
+        // Must create the CM stub first — page_add_instance() uses $data->coursemodule
         // to update course_modules.instance after inserting into mdl_page.
         $cmid = $this->createCmStub($course, 'page');
 
@@ -894,7 +1269,7 @@ class Api
         $moduleinfo->introformat      = FORMAT_HTML;
         $moduleinfo->content          = $content;
         $moduleinfo->contentformat    = FORMAT_HTML;
-        $moduleinfo->trusttext        = 1;  // Prevent Moodle from stripping SVG/emoji HTML.
+        $moduleinfo->trusttext        = 1;  // Prevent Moodle from stripping Mermaid/emoji HTML.
         $moduleinfo->display          = RESOURCELIB_DISPLAY_OPEN;
         $moduleinfo->printintro       = 0;
         $moduleinfo->printlastmodified = 1;
@@ -907,7 +1282,16 @@ class Api
     /**
      * Create a quiz (mod_quiz) and populate it with AI-generated MCQ questions.
      */
-    private function createQuiz($course, $sectionnum, $section)
+    /**
+     * Create a quiz module from a single quiz object.
+     *
+     * @param \stdClass $course
+     * @param int       $sectionnum
+     * @param string    $sectionname Section name (for the quiz title)
+     * @param \stdClass $quiz        One quiz object ({name, questions[]})
+     * @param int       $suffix      When a section has >1 quiz, the 1-based index appended to the name (0 = none)
+     */
+    private function createQuiz($course, $sectionnum, $sectionname, $quiz, $suffix = 0)
     {
         global $CFG, $DB;
         require_once($CFG->dirroot . '/mod/quiz/lib.php');
@@ -917,17 +1301,20 @@ class Api
 
         $cmid = $this->createCmStub($course, 'quiz');
 
-        $questions    = $section->quiz->questions ?? [];
+        $questions    = $quiz->questions ?? [];
         $numquestions = count($questions);
         $totalpoints  = max($numquestions, 1);
 
         // Generate descriptive quiz name based on section content.
         $sectionnum = (int) $sectionnum;
-        $quiznametopic = !empty($section->name) ? $section->name : 'Section ' . $sectionnum;
+        $quiznametopic = !empty($sectionname) ? $sectionname : 'Section ' . $sectionnum;
         // Clean up the topic for use in the quiz name.
         $quiznametopic = preg_replace('/\s*-\s*Lesson$/i', '', $quiznametopic);
         $quiznametopic = preg_replace('/\s*-\s*Quiz$/i', '', $quiznametopic);
         $quizname = 'Section ' . $sectionnum . ': ' . $quiznametopic . ' - Knowledge Check';
+        if ($suffix > 0) {
+            $quizname .= ' (' . $suffix . ')';
+        }
 
         $moduleinfo                              = new \stdClass();
         $moduleinfo->coursemodule               = $cmid;
@@ -970,7 +1357,7 @@ class Api
         $quizid = \quiz_add_instance($moduleinfo, null);
         $this->placeCmInSection($course, $cmid, $sectionnum);
 
-        // â”€â”€ Add AI-generated MCQ questions to the quiz â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // ── Add AI-generated MCQ questions to the quiz ────────────────────────
         if (!empty($questions)) {
             // Get or create the course question category.
             $coursecontext = \context_course::instance($course->id);
@@ -1047,14 +1434,14 @@ class Api
         $explanation = !empty($q->explanation) ? (string) $q->explanation : '';
 
         try {
-            // â”€â”€ question_bank_entries (Moodle 5.x requirement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── question_bank_entries (Moodle 5.x requirement) ───────────────
             $questionbankentry = new \stdClass();
             $questionbankentry->questioncategoryid = $categoryid;
             $questionbankentry->idnumber = null;
             $questionbankentry->ownerid = $USER->id ?? 0;
             $bankentryid = $DB->insert_record('question_bank_entries', $questionbankentry);
 
-            // â”€â”€ question base record â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── question base record ──────────────────────────────────────────
             $question              = new \stdClass();
             $question->category   = $categoryid;
             $question->qtype      = 'multichoice';
@@ -1076,7 +1463,7 @@ class Api
 
             $questionid = $DB->insert_record('question', $question);
 
-            // â”€â”€ question_versions (Moodle 5.x requirement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── question_versions (Moodle 5.x requirement) ───────────────────
             $questionversion = new \stdClass();
             $questionversion->questionbankentryid = $bankentryid;
             $questionversion->questionid = $questionid;
@@ -1084,7 +1471,7 @@ class Api
             $questionversion->status = 'ready';
             $DB->insert_record('question_versions', $questionversion);
 
-            // â”€â”€ qtype_multichoice_options â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── qtype_multichoice_options ─────────────────────────────────────
             $mcoptions                      = new \stdClass();
             $mcoptions->questionid          = $questionid;
             $mcoptions->layout              = 0; // Vertical.
@@ -1100,7 +1487,7 @@ class Api
             $mcoptions->shownumcorrect      = 0;
             $DB->insert_record('qtype_multichoice_options', $mcoptions);
 
-            // â”€â”€ question_answers (one per option) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // ── question_answers (one per option) ────────────────────────────
             foreach ($options as $i => $opttext) {
                 $answer                  = new \stdClass();
                 $answer->question        = $questionid;
@@ -1123,6 +1510,48 @@ class Api
     }
 
     /**
+     * Escape HTML, then render inline markdown (**bold**, `code`) on the safe string.
+     *
+     * @param string $text
+     * @return string
+     */
+    private function inline_markdown(string $text): string
+    {
+        $text = s($text);
+        $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+        $text = preg_replace('/`([^`]+)`/', '<code>$1</code>', $text);
+        return $text;
+    }
+
+    /**
+     * Clean one AI assignment instruction into <li> inner HTML: strip its own leading
+     * number, render bold/code, and turn "-" lines into a nested bullet list.
+     *
+     * @param string $inst
+     * @return string
+     */
+    private function format_instruction_html(string $inst): string
+    {
+        $lines = explode("\n", str_replace("\r", '', $inst));
+        $main = '';
+        $bullets = [];
+        foreach ($lines as $line) {
+            if (preg_match('/^\s*[-•*]\s+/u', $line)) {
+                $bullets[] = $this->inline_markdown(preg_replace('/^\s*[-•*]\s+/u', '', $line));
+            } else if (trim($line) !== '') {
+                // First non-bullet line is the step; strip a leading ordinal like "1. " or "2) ".
+                $cleaned = ($main === '') ? preg_replace('/^\s*\d+[.)]\s+/', '', $line) : $line;
+                $main .= ($main === '' ? '' : ' ') . $this->inline_markdown(trim($cleaned));
+            }
+        }
+        $out = $main;
+        if (!empty($bullets)) {
+            $out .= '<ul><li>' . implode('</li><li>', $bullets) . '</li></ul>';
+        }
+        return $out;
+    }
+
+    /**
      * Create an assignment (mod_assign).
      */
     private function createAssignment($course, $sectionnum, $assignmentdata)
@@ -1138,11 +1567,11 @@ class Api
 
         $intro = !empty($assignmentdata->description) ? $assignmentdata->description : '';
         if (!empty($assignmentdata->instructions) && is_array($assignmentdata->instructions)) {
-            $intro .= '<h4>Instructions</h4><ul>';
+            $intro .= '<h4>Instructions</h4><ol>';
             foreach ($assignmentdata->instructions as $inst) {
-                $intro .= '<li>' . $inst . '</li>';
+                $intro .= '<li>' . $this->format_instruction_html((string)$inst) . '</li>';
             }
-            $intro .= '</ul>';
+            $intro .= '</ol>';
         }
         if (!empty($assignmentdata->word_count)) {
             $intro .= '<p><strong>Word count:</strong> ' . $assignmentdata->word_count . ' words.</p>';
@@ -1208,16 +1637,18 @@ class Api
     }
 
     /**
-     * Call the CourseAgent SaaS to generate an H5P activity for a section and attach it to the course.
+     * Call the CourseAgent API to generate an H5P activity for a section and attach it to the course.
      * Non-fatal: failures are collected in $this->h5pwarnings and logged; course publish is not aborted.
      *
      * @param \stdClass $course     Moodle course record
      * @param int       $sectionnum 1-based section number
      * @param \stdClass $section    Section data from AI (has ->lesson->content_html)
-     * @param string    $saaskey    SaaS API key
+     * @param string    $saaskey    License key
      * @param string    $saasurl    SaaS base URL (no trailing slash)
+     * @param string[]  $allowedtypes Types the teacher's plan permits
+     * @param string|null $forcetype One specific type to generate (from the section's h5p[] list); null = auto-pick
      */
-    private function createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes = [])
+    private function createH5pActivities($course, $sectionnum, $section, $saaskey, $saasurl, $allowedtypes = [], $forcetype = null)
     {
         $content = strip_tags($section->lesson->content_html ?? $section->description ?? '');
         if (empty(trim($content))) {
@@ -1235,10 +1666,13 @@ class Api
             ];
         }
         $activitytype = null;
-        if (!empty($section->h5p_type) && in_array($section->h5p_type, $allowedtypes, true)) {
+        if (!empty($forcetype) && in_array($forcetype, $allowedtypes, true)) {
+            // Caller specified exactly which type to create (one entry from the section's h5p[] list).
+            $activitytype = $forcetype;
+        } elseif (!empty($section->h5p_type) && in_array($section->h5p_type, $allowedtypes, true)) {
             $activitytype = $section->h5p_type;
         } else {
-            // AI type missing or not in allowed list â€” rotate through allowed types.
+            // AI type missing or not in allowed list — rotate through allowed types.
             $activitytype = $allowedtypes[($sectionnum - 1) % count($allowedtypes)];
         }
 
@@ -1248,14 +1682,13 @@ class Api
             'text'          => mb_substr($content, 0, 40000),
         ];
 
+        require_once(__DIR__ . '/saas_http.php');
         $ch = curl_init($saasurl . '/api/v1/h5p/generate');
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $payload,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => [
-                'X-API-Key: ' . $saaskey,
-            ],
+            CURLOPT_HTTPHEADER     => \local_courseagent\saas_http::headers($saaskey),
             CURLOPT_TIMEOUT        => 60,
             CURLOPT_SSL_VERIFYPEER => true,
         ]);
@@ -1264,11 +1697,29 @@ class Api
         $curlerror   = curl_error($ch);
         curl_close($ch);
 
-        // Handle SaaS-specific error codes with user-visible messages.
+        // Handle API error codes with user-visible messages.
         if ($curlerror || $httpcode >= 500) {
             $msg = get_string('h5p_service_unavailable', 'local_courseagent');
             $this->h5pwarnings[] = $msg;
             debugging('CourseAgent H5P section ' . $sectionnum . ': service unavailable (HTTP ' . $httpcode . '): ' . $curlerror, DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode === 401) {
+            $this->h5pwarnings[] = get_string('h5p_invalid_key', 'local_courseagent');
+            debugging('CourseAgent H5P section ' . $sectionnum . ': invalid key (401)', DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode === 403) {
+            $this->h5pwarnings[] = get_string('h5p_plan_restriction', 'local_courseagent');
+            debugging('CourseAgent H5P section ' . $sectionnum . ': plan restriction (403)', DEBUG_DEVELOPER);
+            return;
+        }
+
+        if ($httpcode === 402) {
+            $this->h5pwarnings[] = get_string('h5p_no_plan', 'local_courseagent');
+            debugging('CourseAgent H5P section ' . $sectionnum . ': no active plan (402)', DEBUG_DEVELOPER);
             return;
         }
 
@@ -1283,12 +1734,6 @@ class Api
             return;
         }
 
-        if ($httpcode === 402) {
-            $this->h5pwarnings[] = get_string('h5p_paid_feature', 'local_courseagent');
-            debugging('CourseAgent H5P section ' . $sectionnum . ': paid plan required', DEBUG_DEVELOPER);
-            return;
-        }
-
         if ($httpcode !== 200) {
             $msg = get_string('h5p_service_unavailable', 'local_courseagent');
             $this->h5pwarnings[] = $msg;
@@ -1298,7 +1743,7 @@ class Api
 
         $h5pparams = json_decode($responseraw ?? '');
         if (json_last_error() !== JSON_ERROR_NONE || empty($h5pparams)) {
-            debugging('CourseAgent H5P section ' . $sectionnum . ': invalid JSON from SaaS', DEBUG_DEVELOPER);
+            debugging('CourseAgent H5P section ' . $sectionnum . ': invalid JSON from CourseAgent API', DEBUG_DEVELOPER);
             return;
         }
 
@@ -1405,7 +1850,7 @@ class Api
         // Insert h5pactivity record directly (avoids file_manager draft dependency).
         $record                  = new \stdClass();
         $record->course          = $course->id;
-        $record->name            = $activityname . ' â€” H5P Activity';
+        $record->name            = $activityname . ' — H5P Activity';
         $record->timecreated     = time();
         $record->timemodified    = time();
         $record->intro           = '';
@@ -1514,7 +1959,7 @@ class Api
         $systemprompt = "You are a JSON generator. Return ONLY valid JSON - no markdown code blocks, no explanations, no conversational text. " .
             "The JSON must match the exact structure expected. Start with { and end with }.";
 
-        // Triple-nested fallback: provider â†’ model â†’ 3 retries. Mirrors generateCourseOutline().
+        // Triple-nested fallback: provider → model → 3 retries. Mirrors generateCourseOutline().
         $providers   = $this->buildFallbackProviders(null, null);
         $lasterror   = null;
         $fallbacklog = [];
@@ -1563,7 +2008,7 @@ class Api
         // Sanitize.
         $response = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $response);
         ini_set('pcre.backtrack_limit', 10000000);
-        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"/s', function ($m) {
+        $sanitized = preg_replace_callback('/"((?:[^"\\\\]|\\\\.)*)"\/s', function ($m) {
             $inner = $m[1];
             $inner = preg_replace('/(?<!\\\\)\r/', '\\r', $inner);
             $inner = preg_replace('/(?<!\\\\)\n/', '\\n', $inner);
@@ -1728,10 +2173,27 @@ class Api
                 $section->assignment = $updateditem;
                 break;
         }
+
+        // The chat-edit flow works on the first quiz/assignment (item 0). Mirror the edited
+        // singular field back into the array the preview render + publish layers read from.
+        if (in_array($targettype, ['quiz', 'question'], true) && !empty($section->quiz)) {
+            if (!isset($section->quizzes) || !is_array($section->quizzes) || count($section->quizzes) === 0) {
+                $section->quizzes = [$section->quiz];
+            } else {
+                $section->quizzes[0] = $section->quiz;
+            }
+        }
+        if ($targettype === 'assignment' && !empty($section->assignment)) {
+            if (!isset($section->assignments) || !is_array($section->assignments) || count($section->assignments) === 0) {
+                $section->assignments = [$section->assignment];
+            } else {
+                $section->assignments[0] = $section->assignment;
+            }
+        }
     }
 
     /**
-     * Full course AI assist â€” NLP-direct, conversation-aware.
+     * Full course AI assist — NLP-direct, conversation-aware.
      * Single AI call determines intent + generates content. No separate intent detection.
      *
      * @param stdClass $coursedata Course data object
@@ -1756,7 +2218,7 @@ class Api
             array_slice($history, -10)
         );
 
-        // Triple-nested fallback: provider â†’ model â†’ 3 retries. Mirrors generateCourseOutline().
+        // Triple-nested fallback: provider → model → 3 retries. Mirrors generateCourseOutline().
         $providers   = $this->buildFallbackProviders(null, null);
         $lasterror   = null;
         $fallbacklog = [];
@@ -1841,7 +2303,7 @@ class Api
             }
         }
 
-        // question or plan â€” no course changes yet.
+        // question or plan — no course changes yet.
         // delete ops legitimately have data=null; don't block them.
         if ($rtype !== 'delta' || ($result->op !== 'delete' && empty($result->data))) {
             return (object) [
@@ -1867,7 +2329,7 @@ class Api
 
         debugging('Course Agent AI assist: intent from AI response ' . json_encode($intent), DEBUG_DEVELOPER);
 
-        // Handle delete â€” no AI data needed.
+        // Handle delete — no AI data needed.
         if ($intent->action === 'delete') {
             $updated = $this->mergeDelta($coursedata, $intent, null);
         } else {
@@ -1951,7 +2413,7 @@ class Api
         }
         $prompt .= "\n";
 
-        // Include full content of mentioned section(s) or all sections if â‰¤4.
+        // Include full content of mentioned section(s) or all sections if <=4.
         if ($targetsectionidx !== null) {
             $prompt .= $this->formatSectionFull($sections[$targetsectionidx], $targetsectionidx);
         } elseif ($total <= 4) {
@@ -1972,7 +2434,7 @@ class Api
     private function formatSectionFull($section, int $idx): string
     {
         $num = $idx + 1;
-        $out = "=== FULL CONTENT: SECTION {$num} â€” \"" . ($section->name ?? 'Untitled') . "\" ===\n";
+        $out = "=== FULL CONTENT: SECTION {$num} — \"" . ($section->name ?? 'Untitled') . "\" ===\n";
 
         if (!empty($section->lesson)) {
             $out .= "LESSON:\n";
@@ -2025,7 +2487,7 @@ class Api
         return <<<'SYSTEMPROMPT'
 You are an AI assistant for editing Moodle LMS courses. You receive a course structure, optional full section content, conversation history, and the user's request.
 
-ALWAYS respond with ONLY a valid JSON object â€” no markdown fences, no extra text:
+ALWAYS respond with ONLY a valid JSON object — no markdown fences, no extra text:
 {
   "type": "question|plan|delta",
   "message": "What you say to the user (friendly, concise)",
@@ -2040,15 +2502,15 @@ ALWAYS respond with ONLY a valid JSON object â€” no markdown fences, no ext
 
 RULES:
 - type=question: Request is ambiguous or missing required info. Ask ONE focused question. Set data=null.
-- type=plan: You have ALL information needed to act, but change is large/risky (rewrite full lesson, delete a section). State exactly what you will do in message. Set plan_summary to one sentence summary. Set data=null. NEVER ask the user questions inside a plan message â€” if you need more info first, use type=question instead.
+- type=plan: You have ALL information needed to act, but change is large/risky (rewrite full lesson, delete a section). State exactly what you will do in message. Set plan_summary to one sentence summary. Set data=null. NEVER ask the user questions inside a plan message — if you need more info first, use type=question instead.
 - type=delta: Change is clear and specific, OR user said "yes"/"confirm"/"proceed" after a plan. Include data.
 - section_index is ALWAYS 0-based (section 1 = index 0, section 2 = index 1, etc.).
-- Parse section references from user text ("section 2", "the second section") â€” override any assumed default.
+- Parse section references from user text ("section 2", "the second section") — override any assumed default.
 - question_index is 0-based. Only set for target_type=question.
 - op values: add | update | delete | replace
-- insert_before: for op=add, target=section ONLY â€” 0-based index to insert the new section BEFORE that position. null means append at end. Example: "add before section 2" â†’ insert_before=1.
+- insert_before: for op=add, target=section ONLY — 0-based index to insert the new section BEFORE that position. null means append at end. Example: "add before section 2" → insert_before=1.
 
-EXACT DATA SCHEMAS â€” data field must match these exactly:
+EXACT DATA SCHEMAS — data field must match these exactly:
 
 target_type=lesson:
 {"title":"","summary":"","content_html":"<h2>...</h2><p>...</p>"}
@@ -2066,10 +2528,10 @@ target_type=section (complete new section):
 {"name":"","description":"","lesson":{"title":"","summary":"","content_html":""},"quiz":{"name":"Quiz","questions":[...]},"assignment":{"title":"","description":"","instructions":[],"word_count":500}}
 
 IMPORTANT: For "add N more questions" requests: set target_type=quiz, op=update, and include ALL existing questions PLUS the N new ones in data.questions. Never lose existing questions.
-IMPORTANT: For op=delete, always set data=null â€” never include section/activity content in data.
+IMPORTANT: For op=delete, always set data=null — never include section/activity content in data.
 IMPORTANT: Never combine asking questions with type=plan. If you lack any required detail (title, description, word count, etc.), always use type=question to gather it first, then use type=plan or type=delta once you have what you need.
-MANDATORY DELETE RULE: For ANY delete operation, ALWAYS use type=plan first â€” even if the request is perfectly clear. In message, describe exactly what will be removed and ask the user to confirm. Only use type=delta with op=delete when the user's CURRENT message is an explicit confirmation ("yes", "proceed", "confirm", "go ahead", "do it") of a delete you described in your immediately previous response.
-IMPORTANT: For assignment content â€” NEVER reference external files, datasets, CSVs, PDFs, or downloadable resources that students would need. All assignment tasks must be completable using only the student's own knowledge and publicly available information.
+MANDATORY DELETE RULE: For ANY delete operation, ALWAYS use type=plan first — even if the request is perfectly clear. In message, describe exactly what will be removed and ask the user to confirm. Only use type=delta with op=delete when the user's CURRENT message is an explicit confirmation ("yes", "proceed", "confirm", "go ahead", "do it") of a delete you described in your immediately previous response.
+IMPORTANT: For assignment content — NEVER reference external files, datasets, CSVs, PDFs, or downloadable resources that students would need. All assignment tasks must be completable using only the student's own knowledge and publicly available information.
 SYSTEMPROMPT;
     }
 
@@ -2114,7 +2576,7 @@ SYSTEMPROMPT;
 
     /**
      * Escape bare control characters inside JSON string values.
-     * Character-by-character walk â€” immune to PCRE backtrack limits.
+     * Character-by-character walk — immune to PCRE backtrack limits.
      */
     private function sanitizeJsonStrings(string $json): string
     {
@@ -2175,9 +2637,6 @@ SYSTEMPROMPT;
         $response = trim($rawresponse);
 
         // Strip anchored markdown fence only.
-        // The non-anchored fallback was removed: its non-greedy \{[\s\S]*?\} stops at the
-        // first } in nested JSON (e.g. inside a section's lesson object), producing a
-        // truncated/malformed string. extractJsonObject() handles all fence formats safely.
         if (preg_match('/^```(?:json)?\s*([\s\S]*?)\s*```$/s', $response, $matches)) {
             $response = trim($matches[1]);
         }
@@ -2185,14 +2644,13 @@ SYSTEMPROMPT;
         // Extract first balanced JSON object (brace-counting, handles nested fences in content_html).
         $response = $this->extractJsonObject($response);
 
-        // Fast path â€” works for clean JSON (JSON mode, no unescaped chars).
+        // Fast path — works for clean JSON (JSON mode, no unescaped chars).
         $result = json_decode($response);
         if (json_last_error() === JSON_ERROR_NONE) {
             return $result;
         }
 
         // Sanitize literal newlines/tabs/control-chars inside JSON string values.
-        // Character-by-character â€” immune to PCRE backtrack limits on large responses.
         $sanitized = $this->sanitizeJsonStrings($response);
         $result    = json_decode($sanitized);
         if (json_last_error() === JSON_ERROR_NONE) {
@@ -2272,7 +2730,7 @@ SYSTEMPROMPT;
                         $section->quiz = (object) ['name' => 'Quiz', 'questions' => []];
                     }
                     if ($action === 'add') {
-                        // Append new question â€” don't overwrite existing.
+                        // Append new question — don't overwrite existing.
                         $section->quiz->questions[] = $resultdata;
                     } else {
                         $section->quiz->questions[$qidx] = $resultdata;

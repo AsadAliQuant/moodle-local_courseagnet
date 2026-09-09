@@ -25,6 +25,59 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+/**
+ * Custom admin setting for the CourseAgent license key.
+ * Validates the key against the SaaS API before saving.
+ *
+ * Guarded with class_exists() because Moodle 5.x includes plugin settings.php
+ * more than once per admin request while building the admin tree; without the
+ * guard the second include fatals with "Cannot declare class ... already in use".
+ */
+if (!class_exists('local_courseagent_licensekey_setting')) {
+    require_once(__DIR__ . '/classes/saas_http.php');
+    class local_courseagent_licensekey_setting extends admin_setting_configpasswordunmask {
+        public function write_setting($data) {
+            // Removing the key clears any activated plan — paid features lock immediately.
+            if (empty(trim($data))) {
+                set_config('saas_plan', 'none', 'local_courseagent');
+                return parent::write_setting($data);
+            }
+            $saasurl = defined('COURSEAGENT_SAAS_URL')
+                ? rtrim(COURSEAGENT_SAAS_URL, '/')
+                : 'https://api.courseagent.io';
+            $curl = new \curl(['ignoresecurity' => true]);
+            $curl->setHeader(\local_courseagent\saas_http::headers($data));
+            $resp     = $curl->get($saasurl . '/api/v1/sites/usage');
+            $info     = $curl->get_info();
+            $httpcode = (int)($info['http_code'] ?? 0);
+            if ($httpcode === 401 || $httpcode === 404) {
+                set_config('saas_plan', 'none', 'local_courseagent');
+                return get_string('saas_key_invalid', 'local_courseagent');
+            }
+            if ($httpcode === 403) {
+                $body = json_decode((string)$resp, true);
+                if (is_array($body) && ($body['detail'] ?? '') === 'key_origin_mismatch') {
+                    set_config('saas_plan', 'none', 'local_courseagent');
+                    return get_string('license_origin_mismatch_msg', 'local_courseagent');
+                }
+            }
+            if ($httpcode === 0) {
+                // Could not verify — save the key but keep features locked until activation.
+                set_config('saas_plan', 'none', 'local_courseagent');
+                parent::write_setting($data);
+                return get_string('saas_key_network_error', 'local_courseagent');
+            }
+            // 200 (and any other non-fatal status): store the verified plan, else lock.
+            $body = json_decode((string)$resp, true);
+            $plan = (is_array($body) && in_array($body['plan'] ?? '', ['starter', 'pro'], true))
+                ? $body['plan']
+                : 'none';
+            set_config('saas_plan', $plan, 'local_courseagent');
+            return parent::write_setting($data);
+        }
+    }
+}
+
 if ($hassiteconfig) {
     // Create settings category for our plugin.
     $ADMIN->add(
@@ -100,11 +153,56 @@ if ($hassiteconfig) {
         get_string('saas_heading_desc', 'local_courseagent')
     ));
 
-    $settings->add(new admin_setting_configpasswordunmask(
+    $settings->add(new local_courseagent_licensekey_setting(
         'local_courseagent/saas_api_key',
         get_string('saas_api_key', 'local_courseagent'),
         get_string('saas_api_key_desc', 'local_courseagent'),
         ''
+    ));
+
+    // Activate License button — validates the key against the SaaS and stores the plan.
+    $activatedtpl = addslashes(get_string('saas_activated', 'local_courseagent', '__PLAN__'));
+    $activatebtnhtml  = html_writer::tag('button',
+        get_string('saas_activate_btn', 'local_courseagent'),
+        ['type' => 'button', 'id' => 'ca-test-license-btn', 'class' => 'btn btn-primary btn-sm']
+    );
+    $activatebtnhtml .= ' ' . html_writer::span('', 'small ml-2', ['id' => 'ca-test-license-result']);
+    $activatebtnhtml .= '<script>
+document.addEventListener("DOMContentLoaded", function() {
+    var btn = document.getElementById("ca-test-license-btn");
+    var result = document.getElementById("ca-test-license-result");
+    if (!btn) { return; }
+    btn.addEventListener("click", function() {
+        btn.disabled = true;
+        result.innerHTML = "' . addslashes(get_string('saas_activate_loading', 'local_courseagent')) . '";
+        var fd = new FormData();
+        fd.append("action", "test_license_key");
+        fd.append("sesskey", M.cfg.sesskey);
+        fetch(M.cfg.wwwroot + "/local/courseagent/ajax.php", {method: "POST", body: fd})
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                btn.disabled = false;
+                if (d.success && (d.plan === "starter" || d.plan === "pro")) {
+                    var planLabel = d.plan.charAt(0).toUpperCase() + d.plan.slice(1);
+                    var msg = "' . $activatedtpl . '".replace("__PLAN__", planLabel);
+                    result.innerHTML = "<span class=\"text-success\"><i class=\"fa fa-check-circle\" aria-hidden=\"true\"></i> " + msg + "</span>";
+                } else if (d.success) {
+                    result.innerHTML = "<span class=\"text-warning\"><i class=\"fa fa-exclamation-triangle\" aria-hidden=\"true\"></i> ' . addslashes(get_string('saas_activate_no_plan', 'local_courseagent')) . '</span>";
+                } else {
+                    result.innerHTML = "<span class=\"text-danger\"><i class=\"fa fa-times-circle\" aria-hidden=\"true\"></i> ' . addslashes(get_string('saas_activate_failed', 'local_courseagent')) . '</span>";
+                }
+            })
+            .catch(function() {
+                btn.disabled = false;
+                result.innerHTML = "<span class=\"text-danger\"><i class=\"fa fa-times-circle\" aria-hidden=\"true\"></i> ' . addslashes(get_string('saas_activate_failed', 'local_courseagent')) . '</span>";
+            });
+    });
+});
+</script>';
+    $settings->add(new admin_setting_heading(
+        'local_courseagent/saas_test_connection',
+        '',
+        $activatebtnhtml
     ));
 
     // Add external page for provider management.

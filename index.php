@@ -41,13 +41,19 @@ $PAGE->set_context($context);
 $PAGE->set_title(get_string('create_course', 'local_courseagent'));
 $PAGE->set_heading(get_string('create_course', 'local_courseagent'));
 $PAGE->set_pagelayout('base');
+// The redesigned page renders its own in-content header (breadcrumb + title + subtitle),
+// so suppress the default Moodle page header to avoid a duplicate heading.
+$PAGE->add_body_class('local-courseagent-create');
 
 // Get plugin configuration.
 $maxsections      = get_config('local_courseagent', 'max_sections') ?: 8;
 $maxquiz          = get_config('local_courseagent', 'max_quiz_questions') ?: 7;
 $enableassignments = get_config('local_courseagent', 'enable_assignments') ?: 1;
 $saasapikey       = get_config('local_courseagent', 'saas_api_key') ?: '';
-$hassaaskey       = !empty($saasapikey);
+$saasplan         = get_config('local_courseagent', 'saas_plan') ?: 'none';
+// Paid features require an *activated* paid plan, not just a key. The plan is stored
+// at activation time (settings save / "Activate License" button) after a backend check.
+$hassaaskey       = !empty($saasapikey) && in_array($saasplan, ['starter', 'pro'], true);
 
 // Get available providers.
 $providers       = provider::getAll(true);
@@ -83,38 +89,51 @@ $jsconfig = [
     'maxQuizQuestions'  => (int)  $maxquiz,
     'enableAssignments' => (bool) $enableassignments,
     'hasSaasKey'        => (bool) $hassaaskey,
+    'saasPlan'          => $saasplan,
     'providers'         => $providerconfig,
     'defaultProviderId' => $defaultprovider ? $defaultprovider->id : 0,
 ];
 $PAGE->requires->css(new moodle_url('/local/courseagent/styles.css'));
+$PAGE->requires->js(new moodle_url('/local/courseagent/amd/build/mermaid.min.js'));
 $PAGE->requires->js_call_amd('local_courseagent/coursecreator', 'init', [$jsconfig]);
 
 echo $OUTPUT->header();
 ?>
 
 <div id="courseagent-app">
+
+    <!-- Header & breadcrumb -->
+    <div class="ca-page-head">
+        <nav class="ca-breadcrumb" aria-label="breadcrumb">
+            <a href="<?php echo new moodle_url('/my/'); ?>"><?php print_string('myhome'); ?></a>
+            <i class="fa fa-angle-right ca-breadcrumb-sep" aria-hidden="true"></i>
+            <a href="<?php echo new moodle_url('/local/courseagent/mycourses.php'); ?>"><?php print_string('my_courses', 'local_courseagent'); ?></a>
+            <i class="fa fa-angle-right ca-breadcrumb-sep" aria-hidden="true"></i>
+            <span class="ca-breadcrumb-current"><?php print_string('create_course', 'local_courseagent'); ?></span>
+        </nav>
+        <h1 class="ca-page-title"><?php print_string('create_course', 'local_courseagent'); ?></h1>
+        <p class="ca-page-subtitle"><?php print_string('configure_settings', 'local_courseagent'); ?></p>
+    </div>
+
     <div class="row">
+        <!-- MAIN COLUMN -->
         <div class="col-lg-8">
-            <p class="text-muted mb-3"><?php print_string('configure_settings', 'local_courseagent'); ?></p>
-            <div class="card mb-4">
-                <div class="card-body">
-                    <form id="courseagent-form">
-                        <!-- Course Title -->
-                        <div class="form-group">
-                            <label for="course-custom-title" class="font-weight-bold">
-                                <?php print_string('course_title', 'local_courseagent'); ?>
-                                <span class="text-muted font-weight-normal small ml-1"><?php print_string('optional_override', 'local_courseagent'); ?></span>
-                            </label>
-                            <input type="text" id="course-custom-title" class="form-control"
-                                   placeholder="<?php print_string('course_title_placeholder', 'local_courseagent'); ?>">
-                        </div>
+            <form id="courseagent-form">
+
+                <!-- Card 1: Core Settings -->
+                <div class="card ca-card mb-4">
+                    <div class="card-body">
+                        <h2 class="ca-card-title">
+                            <i class="fa fa-sliders ca-card-title-icon" aria-hidden="true"></i>
+                            <?php print_string('core_settings', 'local_courseagent'); ?>
+                        </h2>
 
                         <!-- Course Topic -->
                         <div class="form-group">
-                            <label for="course-topic" class="font-weight-bold">
+                            <label for="course-topic" class="ca-field-label">
                                 <?php print_string('coursetopic', 'local_courseagent'); ?> <span class="text-danger">*</span>
                             </label>
-                            <textarea id="course-topic" class="form-control" rows="4" maxlength="500"
+                            <textarea id="course-topic" class="form-control" rows="3" maxlength="500"
                                       placeholder="<?php print_string('coursetopic_placeholder', 'local_courseagent'); ?>"></textarea>
                             <small class="form-text text-muted d-flex justify-content-between">
                                 <span><?php print_string('coursetopic_help', 'local_courseagent'); ?></span>
@@ -122,44 +141,20 @@ echo $OUTPUT->header();
                             </small>
                         </div>
 
-                        <!-- Upload content â€” PRO lock -->
-                        <div class="form-group mt-3">
-                            <label class="font-weight-bold d-flex align-items-center">
-                                <?php print_string('upload_content', 'local_courseagent'); ?>
-                                <span class="badge badge-warning ml-2" style="font-size:0.7em;">
-                                    <i class="fa fa-lock" aria-hidden="true"></i>&nbsp;<?php print_string('pro_badge', 'local_courseagent'); ?>
-                                </span>
+                        <!-- Course Title -->
+                        <div class="form-group">
+                            <label for="course-custom-title" class="ca-field-label">
+                                <?php print_string('course_title', 'local_courseagent'); ?>
+                                <span class="text-muted font-weight-normal small ml-1"><?php print_string('optional_override', 'local_courseagent'); ?></span>
                             </label>
-                            <p class="text-muted small mb-2">
-                                <?php print_string('upload_content_desc', 'local_courseagent'); ?>
-                            </p>
-                            <div class="courseagent-pro-wrapper">
-                                <div class="courseagent-dropzone courseagent-dropzone--locked" aria-hidden="true">
-                                    <i class="fa fa-cloud-upload fa-2x text-muted" aria-hidden="true"></i>
-                                    <p class="mb-1 mt-2"><strong><?php print_string('click_to_upload', 'local_courseagent'); ?></strong> <?php print_string('or_drag_drop', 'local_courseagent'); ?></p>
-                                    <p class="small text-muted mb-0">
-                                        <?php print_string('accepted_file_types', 'local_courseagent'); ?>
-                                    </p>
-                                </div>
-                                <div class="courseagent-pro-overlay">
-                                    <div class="text-center px-4">
-                                        <i class="fa fa-lock fa-2x text-warning mb-2" aria-hidden="true"></i>
-                                        <p class="font-weight-bold mb-1"><?php print_string('pro_feature', 'local_courseagent'); ?></p>
-                                        <p class="small text-muted mb-0">
-                                            <?php print_string('pro_feature_desc', 'local_courseagent'); ?>
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                            <input type="file" id="upload-file-input" class="d-none" disabled
-                                   accept=".txt,.pdf,.docx,.pptx,.odt,.rtf,.md,.csv,.epub">
-                            <input type="hidden" id="upload-extracted-text" name="extracted_content">
+                            <input type="text" id="course-custom-title" class="form-control"
+                                   placeholder="<?php print_string('course_title_placeholder', 'local_courseagent'); ?>">
                         </div>
 
                         <div class="row">
                             <!-- Level -->
-                            <div class="form-group col-md-6">
-                                <label for="course-level" class="font-weight-bold"><?php print_string('difficulty_level', 'local_courseagent'); ?></label>
+                            <div class="form-group col-md-6 mb-md-0">
+                                <label for="course-level" class="ca-field-label"><?php print_string('difficulty_level', 'local_courseagent'); ?></label>
                                 <select id="course-level" class="custom-select">
                                     <option value="beginner"><?php print_string('level_beginner', 'local_courseagent'); ?></option>
                                     <option value="intermediate" selected><?php print_string('level_intermediate', 'local_courseagent'); ?></option>
@@ -167,213 +162,288 @@ echo $OUTPUT->header();
                                 </select>
                             </div>
                             <!-- Number of Sections -->
-                            <div class="form-group col-md-6">
-                                <label for="num-sections" class="font-weight-bold"><?php print_string('num_sections', 'local_courseagent'); ?></label>
+                            <div class="form-group col-md-6 mb-0">
+                                <label for="num-sections" class="ca-field-label"><?php print_string('num_sections', 'local_courseagent'); ?></label>
                                 <input type="number" id="num-sections" class="form-control"
                                        min="2" max="<?php echo $maxsections; ?>" value="4">
                                 <small class="form-text text-muted"><?php print_string('sections_range', 'local_courseagent', $maxsections); ?></small>
                             </div>
                         </div>
+                    </div>
+                </div>
 
-                        <hr class="my-4">
+                <!-- Card 2: Content Generation Rules -->
+                <div class="card ca-card mb-4">
+                    <div class="card-body">
+                        <h2 class="ca-card-title">
+                            <i class="fa fa-puzzle-piece ca-card-title-icon" aria-hidden="true"></i>
+                            <?php print_string('content_generation_rules', 'local_courseagent'); ?>
+                        </h2>
+                        <p class="ca-card-subtitle"><?php print_string('content_generation_rules_desc', 'local_courseagent'); ?></p>
 
-                        <!-- Included Components -->
-                        <div class="form-group">
-                            <label class="font-weight-bold mb-3"><?php print_string('included_components', 'local_courseagent'); ?></label>
+                        <div class="ca-rules">
 
-                            <!-- Include Quizzes -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
-                                <div class="d-flex align-items-center">
-                                    <div class="mr-3">
-                                        <span class="badge badge-primary rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
-                                              style="width:2.5rem;height:2.5rem;">
-                                            <i class="fa fa-question-circle"></i>
-                                        </span>
+                            <!-- Quizzes rule -->
+                            <div class="ca-rule">
+                                <div class="ca-rule-head">
+                                    <div class="ca-rule-info">
+                                        <span class="ca-rule-icon"><i class="fa fa-question-circle" aria-hidden="true"></i></span>
+                                        <div>
+                                            <div class="ca-rule-title"><?php print_string('include_quizzes', 'local_courseagent'); ?></div>
+                                            <div class="ca-rule-desc"><?php print_string('include_quizzes_desc', 'local_courseagent'); ?></div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div class="font-weight-bold"><?php print_string('include_quizzes', 'local_courseagent'); ?></div>
-                                        <div class="small text-muted"><?php print_string('include_quizzes_desc', 'local_courseagent'); ?></div>
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="include-quiz">
+                                        <label class="custom-control-label" for="include-quiz"></label>
                                     </div>
                                 </div>
-                                <div class="custom-control custom-switch">
-                                    <input type="checkbox" class="custom-control-input" id="include-quiz" checked>
-                                    <label class="custom-control-label" for="include-quiz"></label>
+                                <div id="quiz-minmax" class="ca-rule-body">
+                                    <div class="ca-subopts">
+                                        <div class="ca-subopt ca-subopt--off" id="quiz-per-section-subopt">
+                                            <div class="ca-subopt-head">
+                                                <div class="ca-subopt-info">
+                                                    <div class="ca-subopt-title"><?php print_string('per_section_label', 'local_courseagent'); ?></div>
+                                                    <div class="ca-subopt-desc"><?php print_string('per_section_desc', 'local_courseagent'); ?></div>
+                                                </div>
+                                                <div class="custom-control custom-switch ca-subopt-switch">
+                                                    <input type="checkbox" class="custom-control-input ca-subopt-toggle" id="quiz-per-section-enabled" data-activity="quiz">
+                                                    <label class="custom-control-label" for="quiz-per-section-enabled"></label>
+                                                </div>
+                                            </div>
+                                            <div class="ca-subopt-body">
+                                                <div class="ca-range">
+                                                    <span class="ca-range-val ca-range-val--min">1</span>
+                                                    <div class="ca-range-track">
+                                                        <div class="ca-range-fill"></div>
+                                                        <input type="range" class="ca-range-input ca-range-input--min" id="quiz-min-per-section" min="1" max="10" value="1">
+                                                        <input type="range" class="ca-range-input ca-range-input--max" id="quiz-max-per-section" min="1" max="10" value="3">
+                                                    </div>
+                                                    <span class="ca-range-val ca-range-val--max">3</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="ca-subopt ca-subopt--off" id="quiz-total-subopt">
+                                            <div class="ca-subopt-head">
+                                                <div class="ca-subopt-info">
+                                                    <div class="ca-subopt-title"><?php print_string('total_course_label', 'local_courseagent'); ?></div>
+                                                    <div class="ca-subopt-desc"><?php print_string('total_course_desc', 'local_courseagent'); ?></div>
+                                                </div>
+                                                <div class="custom-control custom-switch ca-subopt-switch">
+                                                    <input type="checkbox" class="custom-control-input ca-subopt-toggle" id="quiz-total-enabled" data-activity="quiz">
+                                                    <label class="custom-control-label" for="quiz-total-enabled"></label>
+                                                </div>
+                                            </div>
+                                            <div class="ca-subopt-body">
+                                                <div class="ca-range">
+                                                    <span class="ca-range-val ca-range-val--min">1</span>
+                                                    <div class="ca-range-track">
+                                                        <div class="ca-range-fill"></div>
+                                                        <input type="range" class="ca-range-input ca-range-input--min" id="quiz-min-total" min="1" max="20" value="1">
+                                                        <input type="range" class="ca-range-input ca-range-input--max" id="quiz-max-total" min="1" max="20" value="6">
+                                                    </div>
+                                                    <span class="ca-range-val ca-range-val--max">6</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
                             <?php if ($enableassignments) : ?>
-                            <!-- Include Assignments -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
-                                <div class="d-flex align-items-center">
-                                    <div class="mr-3">
-                                        <span class="badge badge-secondary rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
-                                              style="width:2.5rem;height:2.5rem;">
-                                            <i class="fa fa-pencil-square-o"></i>
-                                        </span>
+                            <!-- Assignments rule -->
+                            <div class="ca-rule">
+                                <div class="ca-rule-head">
+                                    <div class="ca-rule-info">
+                                        <span class="ca-rule-icon"><i class="fa fa-pencil-square-o" aria-hidden="true"></i></span>
+                                        <div>
+                                            <div class="ca-rule-title"><?php print_string('include_assignments_label', 'local_courseagent'); ?></div>
+                                            <div class="ca-rule-desc"><?php print_string('include_assignments_desc_ui', 'local_courseagent'); ?></div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div class="font-weight-bold"><?php print_string('include_assignments_label', 'local_courseagent'); ?></div>
-                                        <div class="small text-muted"><?php print_string('include_assignments_desc_ui', 'local_courseagent'); ?></div>
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="include-assignment">
+                                        <label class="custom-control-label" for="include-assignment"></label>
                                     </div>
                                 </div>
-                                <div class="custom-control custom-switch">
-                                    <input type="checkbox" class="custom-control-input" id="include-assignment" checked>
-                                    <label class="custom-control-label" for="include-assignment"></label>
+                                <div id="assignment-minmax" class="ca-rule-body">
+                                    <div class="ca-subopts">
+                                        <div class="ca-subopt ca-subopt--off" id="assignment-per-section-subopt">
+                                            <div class="ca-subopt-head">
+                                                <div class="ca-subopt-info">
+                                                    <div class="ca-subopt-title"><?php print_string('per_section_label', 'local_courseagent'); ?></div>
+                                                    <div class="ca-subopt-desc"><?php print_string('per_section_desc', 'local_courseagent'); ?></div>
+                                                </div>
+                                                <div class="custom-control custom-switch ca-subopt-switch">
+                                                    <input type="checkbox" class="custom-control-input ca-subopt-toggle" id="assignment-per-section-enabled" data-activity="assignment">
+                                                    <label class="custom-control-label" for="assignment-per-section-enabled"></label>
+                                                </div>
+                                            </div>
+                                            <div class="ca-subopt-body">
+                                                <div class="ca-range">
+                                                    <span class="ca-range-val ca-range-val--min">1</span>
+                                                    <div class="ca-range-track">
+                                                        <div class="ca-range-fill"></div>
+                                                        <input type="range" class="ca-range-input ca-range-input--min" id="assignment-min-per-section" min="1" max="10" value="1">
+                                                        <input type="range" class="ca-range-input ca-range-input--max" id="assignment-max-per-section" min="1" max="10" value="2">
+                                                    </div>
+                                                    <span class="ca-range-val ca-range-val--max">2</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="ca-subopt ca-subopt--off" id="assignment-total-subopt">
+                                            <div class="ca-subopt-head">
+                                                <div class="ca-subopt-info">
+                                                    <div class="ca-subopt-title"><?php print_string('total_course_label', 'local_courseagent'); ?></div>
+                                                    <div class="ca-subopt-desc"><?php print_string('total_course_desc', 'local_courseagent'); ?></div>
+                                                </div>
+                                                <div class="custom-control custom-switch ca-subopt-switch">
+                                                    <input type="checkbox" class="custom-control-input ca-subopt-toggle" id="assignment-total-enabled" data-activity="assignment">
+                                                    <label class="custom-control-label" for="assignment-total-enabled"></label>
+                                                </div>
+                                            </div>
+                                            <div class="ca-subopt-body">
+                                                <div class="ca-range">
+                                                    <span class="ca-range-val ca-range-val--min">1</span>
+                                                    <div class="ca-range-track">
+                                                        <div class="ca-range-fill"></div>
+                                                        <input type="range" class="ca-range-input ca-range-input--min" id="assignment-min-total" min="1" max="20" value="1">
+                                                        <input type="range" class="ca-range-input ca-range-input--max" id="assignment-max-total" min="1" max="20" value="4">
+                                                    </div>
+                                                    <span class="ca-range-val ca-range-val--max">4</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <?php endif; ?>
 
-                            <!-- Use Emojis -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
-                                <div class="d-flex align-items-center">
-                                    <div class="mr-3">
-                                        <span class="badge badge-info rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
-                                              style="width:2.5rem;height:2.5rem;">
-                                            <i class="fa fa-smile-o"></i>
-                                        </span>
+                            <!-- Visuals: Emojis + SVG -->
+                            <div class="ca-visuals">
+                                <div class="ca-rule ca-rule--simple">
+                                    <div class="ca-rule-info">
+                                        <span class="ca-rule-icon"><i class="fa fa-smile-o" aria-hidden="true"></i></span>
+                                        <div>
+                                            <div class="ca-rule-title"><?php print_string('use_emojis_label', 'local_courseagent'); ?></div>
+                                            <div class="ca-rule-desc"><?php print_string('use_emojis_desc_ui', 'local_courseagent'); ?></div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div class="font-weight-bold"><?php print_string('use_emojis_label', 'local_courseagent'); ?></div>
-                                        <div class="small text-muted"><?php print_string('use_emojis_desc_ui', 'local_courseagent'); ?></div>
-                                    </div>
-                                </div>
-                                <div class="custom-control custom-switch">
-                                    <input type="checkbox" class="custom-control-input" id="use-emojis">
-                                    <label class="custom-control-label" for="use-emojis"></label>
-                                </div>
-                            </div>
-
-                            <!-- Include SVG -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border mb-2">
-                                <div class="d-flex align-items-center">
-                                    <div class="mr-3">
-                                        <span class="badge badge-info rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
-                                              style="width:2.5rem;height:2.5rem;">
-                                            <i class="fa fa-picture-o"></i>
-                                        </span>
-                                    </div>
-                                    <div>
-                                        <div class="font-weight-bold"><?php print_string('include_svg_diagrams', 'local_courseagent'); ?></div>
-                                        <div class="small text-muted"><?php print_string('include_svg_desc_ui', 'local_courseagent'); ?></div>
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="use-emojis">
+                                        <label class="custom-control-label" for="use-emojis"></label>
                                     </div>
                                 </div>
-                                <div class="custom-control custom-switch">
-                                    <input type="checkbox" class="custom-control-input" id="use-svg">
-                                    <label class="custom-control-label" for="use-svg"></label>
+                                <div class="ca-rule ca-rule--simple">
+                                    <div class="ca-rule-info">
+                                        <span class="ca-rule-icon"><i class="fa fa-sitemap" aria-hidden="true"></i></span>
+                                        <div>
+                                            <div class="ca-rule-title"><?php print_string('include_diagrams', 'local_courseagent'); ?></div>
+                                            <div class="ca-rule-desc"><?php print_string('include_diagrams_desc_ui', 'local_courseagent'); ?></div>
+                                        </div>
+                                    </div>
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="use-diagrams">
+                                        <label class="custom-control-label" for="use-diagrams"></label>
+                                    </div>
                                 </div>
                             </div>
 
                             <?php if ($hassaaskey) : ?>
-                            <!-- Generate H5P Activities (SaaS) -->
-                            <div class="d-flex align-items-center justify-content-between p-3 bg-light rounded border">
-                                <div class="d-flex align-items-center">
-                                    <div class="mr-3">
-                                        <span class="badge badge-success rounded-circle p-2 d-inline-flex align-items-center justify-content-center"
-                                              style="width:2.5rem;height:2.5rem;">
-                                            <i class="fa fa-cubes"></i>
-                                        </span>
+                            <!-- Generate H5P Activities (CourseAgent) -->
+                            <div id="h5p-toggle-container" class="ca-rule ca-rule--accent">
+                                <div class="ca-rule-head">
+                                    <div class="ca-rule-info">
+                                        <span class="ca-rule-icon ca-rule-icon--accent"><i class="fa fa-cubes" aria-hidden="true"></i></span>
+                                        <div>
+                                            <div class="ca-rule-title ca-rule-title--accent"><?php print_string('include_h5p', 'local_courseagent'); ?></div>
+                                            <div class="ca-rule-desc"><?php print_string('include_h5p_desc', 'local_courseagent'); ?></div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <div class="font-weight-bold"><?php print_string('include_h5p', 'local_courseagent'); ?></div>
-                                        <div class="small text-muted"><?php print_string('include_h5p_desc', 'local_courseagent'); ?></div>
+                                    <div class="custom-control custom-switch">
+                                        <input type="checkbox" class="custom-control-input" id="include-h5p">
+                                        <label class="custom-control-label" for="include-h5p"></label>
                                     </div>
                                 </div>
-                                <div class="custom-control custom-switch">
-                                    <input type="checkbox" class="custom-control-input" id="include-h5p">
-                                    <label class="custom-control-label" for="include-h5p"></label>
-                                </div>
+                                <!-- H5P type selector + min/max injected here by JS -->
                             </div>
                             <?php endif; ?>
+
                         </div>
-
-                        <hr class="my-4">
-
-                        <div class="row">
-                            <!-- AI Provider -->
-                            <div class="form-group col-md-6">
-                                <label for="ai-provider" class="font-weight-bold"><?php print_string('ai_provider', 'local_courseagent'); ?></label>
-                                <select id="ai-provider" class="custom-select">
-                                    <?php foreach ($providers as $p) : ?>
-                                        <option value="<?php echo $p->id; ?>"
-                                            <?php echo $p->isdefault ? 'selected' : ''; ?>>
-                                            <?php echo format_string($p->name);
-                                                  echo $p->isdefault ? ' (' . get_string('provider_default', 'local_courseagent') . ')' : ''; ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            <!-- AI Model -->
-                            <div class="form-group col-md-6">
-                                <label for="ai-model" class="font-weight-bold"><?php print_string('model_selection', 'local_courseagent'); ?></label>
-                                <select id="ai-model" class="custom-select">
-                                    <option value=""><?php print_string('provider_autoselect', 'local_courseagent'); ?></option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="d-flex justify-content-end mt-4">
-                            <button type="button" id="btn-generate" class="btn btn-primary btn-lg">
-                                <i class="fa fa-magic fa-fw" aria-hidden="true"></i>
-                                <?php print_string('generate_course_btn', 'local_courseagent'); ?>
-                            </button>
-                        </div>
-                    </form>
-
+                    </div>
                 </div>
-            </div>
+
+                <!-- Card 3: AI Engine & Actions -->
+                <div class="card ca-card mb-4">
+                    <div class="card-body">
+                        <div class="ca-engine">
+                            <div class="row ca-engine-fields">
+                                <!-- AI Provider -->
+                                <div class="form-group col-md-6 mb-md-0">
+                                    <label for="ai-provider" class="ca-field-label"><?php print_string('ai_provider', 'local_courseagent'); ?></label>
+                                    <select id="ai-provider" class="custom-select">
+                                        <?php foreach ($providers as $p) : ?>
+                                            <option value="<?php echo $p->id; ?>"
+                                                <?php echo $p->isdefault ? 'selected' : ''; ?>>
+                                                <?php echo format_string($p->name);
+                                                      echo $p->isdefault ? ' (' . get_string('provider_default', 'local_courseagent') . ')' : ''; ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <!-- AI Model -->
+                                <div class="form-group col-md-6 mb-0">
+                                    <label for="ai-model" class="ca-field-label"><?php print_string('model_selection', 'local_courseagent'); ?></label>
+                                    <select id="ai-model" class="custom-select">
+                                        <option value=""><?php print_string('provider_autoselect', 'local_courseagent'); ?></option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="ca-engine-action">
+                                <button type="button" id="btn-generate" class="btn btn-primary btn-lg">
+                                    <i class="fa fa-magic fa-fw" aria-hidden="true"></i>
+                                    <?php print_string('generate_course_btn', 'local_courseagent'); ?>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+            </form>
         </div>
 
-        <!-- RIGHT PANEL: How it works -->
+        <!-- RIGHT PANEL: How it works + Pro tip -->
         <div class="col-lg-4">
-            <div class="card">
+            <div class="card ca-card ca-sidebar-card mb-4">
                 <div class="card-body">
-                    <h4 class="mb-4 d-flex align-items-center">
-                        <i class="fa fa-info-circle text-primary mr-2"></i>
-                        <?php print_string('how_it_works', 'local_courseagent'); ?>
-                    </h4>
-                    <p class="text-muted small mb-4">
-                        <?php print_string('how_it_works_desc', 'local_courseagent'); ?>
-                    </p>
-                    <div class="list-group list-group-flush">
-                        <div class="list-group-item px-0 d-flex align-items-start">
-                            <span class="badge badge-light rounded-circle p-2 mr-3 border d-inline-flex align-items-center justify-content-center"
-                                  style="width:2.5rem;height:2.5rem;">
-                                <i class="fa fa-list-ol text-primary"></i>
-                            </span>
-                            <div>
-                                <h6 class="mb-1"><?php print_string('structuring', 'local_courseagent'); ?></h6>
-                                <p class="small text-muted mb-0"><?php print_string('structuring_desc', 'local_courseagent'); ?></p>
-                            </div>
+                    <h3 class="ca-sidebar-title"><?php print_string('how_it_works', 'local_courseagent'); ?></h3>
+                    <p class="text-muted small mb-4"><?php print_string('how_it_works_desc', 'local_courseagent'); ?></p>
+                    <div class="ca-timeline">
+                        <div class="ca-timeline-step">
+                            <div class="ca-timeline-dot">1</div>
+                            <h4 class="ca-timeline-step-title"><?php print_string('structuring', 'local_courseagent'); ?></h4>
+                            <p class="ca-timeline-step-desc"><?php print_string('structuring_desc', 'local_courseagent'); ?></p>
                         </div>
-                        <div class="list-group-item px-0 d-flex align-items-start">
-                            <span class="badge badge-light rounded-circle p-2 mr-3 border d-inline-flex align-items-center justify-content-center"
-                                  style="width:2.5rem;height:2.5rem;">
-                                <i class="fa fa-file-text-o text-primary"></i>
-                            </span>
-                            <div>
-                                <h6 class="mb-1"><?php print_string('content_generation', 'local_courseagent'); ?></h6>
-                                <p class="small text-muted mb-0"><?php print_string('content_generation_desc', 'local_courseagent'); ?></p>
-                            </div>
+                        <div class="ca-timeline-step">
+                            <div class="ca-timeline-dot">2</div>
+                            <h4 class="ca-timeline-step-title"><?php print_string('content_generation', 'local_courseagent'); ?></h4>
+                            <p class="ca-timeline-step-desc"><?php print_string('content_generation_desc', 'local_courseagent'); ?></p>
                         </div>
-                        <div class="list-group-item px-0 d-flex align-items-start">
-                            <span class="badge badge-light rounded-circle p-2 mr-3 border d-inline-flex align-items-center justify-content-center"
-                                  style="width:2.5rem;height:2.5rem;">
-                                <i class="fa fa-check-circle text-primary"></i>
-                            </span>
-                            <div>
-                                <h6 class="mb-1"><?php print_string('review_refine', 'local_courseagent'); ?></h6>
-                                <p class="small text-muted mb-0"><?php print_string('review_refine_desc', 'local_courseagent'); ?></p>
-                            </div>
+                        <div class="ca-timeline-step">
+                            <div class="ca-timeline-dot">3</div>
+                            <h4 class="ca-timeline-step-title"><?php print_string('review_refine', 'local_courseagent'); ?></h4>
+                            <p class="ca-timeline-step-desc"><?php print_string('review_refine_desc', 'local_courseagent'); ?></p>
                         </div>
                     </div>
-                    <div class="mt-4 p-3 bg-light rounded border">
-                        <div class="d-flex align-items-start">
-                            <i class="fa fa-lightbulb-o text-warning mr-2 mt-1"></i>
-                            <p class="small text-muted mb-0">
-                                <strong><?php print_string('pro_tip', 'local_courseagent'); ?></strong> <?php print_string('pro_tip_desc', 'local_courseagent'); ?>
-                            </p>
-                        </div>
-                    </div>
+                </div>
+            </div>
+
+            <div class="ca-protip">
+                <i class="fa fa-lightbulb-o ca-protip-icon" aria-hidden="true"></i>
+                <div>
+                    <h4 class="ca-protip-title"><?php print_string('pro_tip', 'local_courseagent'); ?></h4>
+                    <p class="ca-protip-text"><?php print_string('pro_tip_desc', 'local_courseagent'); ?></p>
                 </div>
             </div>
         </div>
@@ -383,49 +453,42 @@ echo $OUTPUT->header();
 <!-- Loading modal overlay -->
 <div id="ca-loading-modal" class="ca-loading-modal" style="display:none;" role="dialog" aria-modal="true">
     <div class="ca-loading-modal-content">
-        <!-- Spinner -->
-        <div class="ca-loading-ring mb-4">
-            <div class="ca-loading-ring-track"></div>
-            <div class="ca-loading-ring-fill"></div>
-            <i class="fa fa-magic ca-loading-ring-icon" aria-hidden="true"></i>
-        </div>
 
-        <!-- Header -->
-        <h4 id="ca-loading-title" class="mb-2"><?php print_string('generating_course', 'local_courseagent'); ?></h4>
-        <p id="ca-loading-desc" class="text-muted mb-4"><?php print_string('generating_course_desc', 'local_courseagent'); ?></p>
-
-        <!-- Progress bar -->
-        <div class="progress mb-1" style="height:6px;">
-            <div id="ca-loading-progress" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%"></div>
-        </div>
-        <div class="text-right mb-4">
-            <small class="text-muted" id="ca-loading-percent">0%</small>
-        </div>
-
-        <!-- Steps -->
-        <div class="ca-steps-list">
-            <div id="ca-step-outline" class="ca-step ca-step-active">
-                <div class="ca-step-bubble">
-                    <i class="fa fa-hourglass-half" aria-hidden="true"></i>
-                </div>
-                <span class="ca-step-label"><?php print_string('step_outline', 'local_courseagent'); ?></span>
+        <!-- In-progress state -->
+        <div id="ca-loading-running">
+            <!-- Spinner -->
+            <div class="ca-loading-ring mb-4">
+                <div class="ca-loading-ring-track"></div>
+                <div class="ca-loading-ring-fill"></div>
+                <i class="fa fa-magic ca-loading-ring-icon" aria-hidden="true"></i>
             </div>
-            <div id="ca-step-lessons" class="ca-step ca-step-pending">
-                <div class="ca-step-bubble">2</div>
-                <span class="ca-step-label"><?php print_string('step_lessons', 'local_courseagent'); ?></span>
+
+            <!-- Header -->
+            <h4 id="ca-loading-title" class="mb-2"><?php print_string('generating_course', 'local_courseagent'); ?></h4>
+            <p id="ca-loading-desc" class="text-muted mb-4"><?php print_string('generating_course_desc', 'local_courseagent'); ?></p>
+
+            <!-- Indeterminate progress bar: a single AI call has no real sub-progress to report. -->
+            <div class="progress mb-4" style="height:6px;">
+                <div id="ca-loading-progress" class="progress-bar progress-bar-striped progress-bar-animated" style="width:100%"></div>
             </div>
-            <div id="ca-step-extras" class="ca-step ca-step-pending">
-                <div class="ca-step-bubble">3</div>
-                <span class="ca-step-label"><?php print_string('step_extras', 'local_courseagent'); ?></span>
+
+            <!-- Cancel button -->
+            <div class="text-center mt-4">
+                <button type="button" id="btn-cancel-generate" class="btn btn-outline-secondary btn-sm">
+                    <i class="fa fa-times fa-fw" aria-hidden="true"></i> <?php print_string('cancel', 'local_courseagent'); ?>
+                </button>
             </div>
         </div>
 
-        <!-- Cancel button -->
-        <div class="text-center mt-4">
-            <button type="button" id="btn-cancel-generate" class="btn btn-outline-secondary btn-sm">
-                <i class="fa fa-times fa-fw" aria-hidden="true"></i> <?php print_string('cancel', 'local_courseagent'); ?>
-            </button>
+        <!-- Error state — shown in-place when generation fails so user doesn't lose context -->
+        <div id="ca-loading-error" style="display:none;" class="text-center py-2">
+            <div class="mb-3">
+                <i class="fa fa-exclamation-circle text-danger" style="font-size:2.5rem;" aria-hidden="true"></i>
+            </div>
+            <p id="ca-loading-error-msg" class="mb-4" style="max-width:400px;margin:0 auto 1.5rem;"></p>
+            <button type="button" id="btn-loading-dismiss" class="btn btn-outline-secondary btn-sm">Dismiss</button>
         </div>
+
     </div>
 </div>
 
@@ -460,4 +523,3 @@ echo $OUTPUT->header();
 </div>
 
 <?php echo $OUTPUT->footer();
-

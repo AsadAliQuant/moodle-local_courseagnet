@@ -18,18 +18,25 @@
 /**
  * AJAX endpoint for local_courseagent actions.
  *
+ * Entry-point script: legitimately mixes declarations with side effects (require,
+ * define, header, etc.) — suppress PSR1.Files.SideEffects per Moodle convention.
+ *
  * @package   local_courseagent
  * @copyright 2026 Course Agent
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+// phpcs:disable PSR1.Files.SideEffects
+
 define('AJAX_SCRIPT', true);
 require_once(__DIR__ . '/../../config.php');
 require_once(__DIR__ . '/classes/api.php');
 require_once(__DIR__ . '/classes/extractor.php');
+require_once(__DIR__ . '/classes/license.php');
+require_once(__DIR__ . '/classes/saas_http.php');
 
-use local_courseagent\Provider;
-use local_courseagent\Api;
+use local_courseagent\provider;
+use local_courseagent\api;
 
 /**
  * Write progress update to a temp file for client polling.
@@ -78,10 +85,48 @@ register_shutdown_function(function () {
     }
 });
 
+// Pre-flight license validator for SaaS-mode actions.
+// Returns null when free mode (no key) or when validation passes; otherwise an
+// array with 'soft_fail' (bool) and 'payload' (JSON-ready array). soft_fail=true
+// means the SaaS itself is unreachable — caller may fall back to free mode
+// instead of blocking; soft_fail=false means the key/plan is bad — caller blocks.
+$preflightlicense = function () {
+    $key = get_config('local_courseagent', 'saas_api_key') ?: '';
+    if (empty($key)) {
+        return null;
+    }
+    $result = \local_courseagent\license::validate($key);
+    if ($result['valid']) {
+        return null;
+    }
+    $soft = in_array($result['error_code'], ['network_error', 'service_error'], true);
+    return [
+        'soft_fail' => $soft,
+        'payload'   => \local_courseagent\license::build_error_payload($result),
+    ];
+};
+
+// Collect the per-activity count params (sliders + sub-option toggles) from the request
+// and resolve them into the tidy struct the API/prompt/publish layers consume.
+$collectcounts = function () {
+    $raw = [];
+    foreach (['quiz', 'assignment', 'h5p'] as $act) {
+        $raw[$act . '_per_section_enabled'] = optional_param($act . '_per_section_enabled', 0, PARAM_BOOL);
+        $raw[$act . '_total_enabled']       = optional_param($act . '_total_enabled', 0, PARAM_BOOL);
+        $raw[$act . '_min_per_section']     = optional_param($act . '_min_per_section', 1, PARAM_INT);
+        $raw[$act . '_max_per_section']     = optional_param($act . '_max_per_section', 1, PARAM_INT);
+        $raw[$act . '_min_total']           = optional_param($act . '_min_total', 1, PARAM_INT);
+        $raw[$act . '_max_total']           = optional_param($act . '_max_total', 1, PARAM_INT);
+    }
+    return \local_courseagent\api::resolveCounts($raw);
+};
+
 try {
     switch ($action) {
         case 'plan':
-            // Generate lightweight course plan (paid users only â€” called before full generation).
+            // Generate lightweight course plan. The outline itself runs on the local AI provider,
+            // so it is free. Only validate the license when this call actually requests a paid
+            // feature (H5P activity generation) — otherwise free planning must never be blocked.
             $topic             = optional_param('topic', '', PARAM_TEXT);
             $level             = optional_param('level', 'intermediate', PARAM_TEXT);
             $numsections       = optional_param('numsections', 4, PARAM_INT);
@@ -91,14 +136,22 @@ try {
             $h5ptypes          = optional_param('h5p_types', '', PARAM_TEXT);
             $providerid        = optional_param('provider', 0, PARAM_INT);
             $model             = optional_param('model', '', PARAM_TEXT);
-            $extractedcontent  = optional_param('extracted_content', '', PARAM_RAW);
             $customtitle       = optional_param('custom_title', '', PARAM_TEXT);
 
-            if (empty(trim($topic)) && empty(trim($extractedcontent))) {
+            // Paid-feature gate: block up-front only when H5P is enabled and the license fails.
+            if ($includeh5p) {
+                $lic = $preflightlicense();
+                if ($lic !== null) {
+                    echo json_encode($lic['payload']);
+                    break;
+                }
+            }
+
+            if (empty(trim($topic))) {
                 throw new Exception(get_string('error_no_topic', 'local_courseagent'));
             }
 
-            $api  = new Api();
+            $api  = new api();
             $plan = $api->planCourseOutline(
                 $topic,
                 $level,
@@ -108,9 +161,10 @@ try {
                 $includeh5p,
                 $providerid > 0 ? $providerid : null,
                 $model ?: null,
-                $extractedcontent ?: null,
+                null,
                 $customtitle ?: null,
-                $h5ptypes
+                $h5ptypes,
+                $collectcounts()
             );
 
             global $SESSION;
@@ -120,24 +174,34 @@ try {
             break;
 
         case 'generate':
-            // Generate course outline using AI.
+            // Generate course outline using AI (runs on the local AI provider — free).
+            $licensewarning = null;
             $topic = optional_param('topic', '', PARAM_TEXT);
             $level = optional_param('level', 'intermediate', PARAM_TEXT);
             $numsections = optional_param('numsections', 4, PARAM_INT);
             $includequiz = optional_param('includequiz', true, PARAM_BOOL);
             $includeassignment = optional_param('includeassignment', false, PARAM_BOOL);
             $useemojis = optional_param('useemojis', false, PARAM_BOOL);
-            $usesvg = optional_param('usesvg', false, PARAM_BOOL);
+            $usediagrams = optional_param('usediagrams', false, PARAM_BOOL);
             $includeh5p = optional_param('includeh5p', false, PARAM_BOOL);
             $h5ptypes   = optional_param('h5p_types', '', PARAM_TEXT);
             $useplan = optional_param('use_plan', false, PARAM_BOOL);
             $providerid = optional_param('provider', 0, PARAM_INT);
             $model = optional_param('model', '', PARAM_TEXT);
-            $extractedcontent = optional_param('extracted_content', '', PARAM_RAW);
             $customtitle = optional_param('custom_title', '', PARAM_TEXT);
 
-            // Require at least a topic or uploaded content.
-            if (empty(trim($topic)) && empty(trim($extractedcontent))) {
+            // Paid-feature gate: block only when H5P is enabled and the license fails.
+            // Free generations (H5P off) never touch the SaaS, so they are never gated.
+            if ($includeh5p && !empty(get_config('local_courseagent', 'saas_api_key'))) {
+                $lic = $preflightlicense();
+                if ($lic !== null) {
+                    echo json_encode($lic['payload']);
+                    break;
+                }
+            }
+
+            // Require a topic.
+            if (empty(trim($topic))) {
                 throw new Exception(get_string('error_no_topic', 'local_courseagent'));
             }
 
@@ -154,8 +218,11 @@ try {
                 ? $SESSION->courseagent_plan
                 : null;
 
+            // Resolve the activity-count rules once and reuse them for generation + publish.
+            $counts = $collectcounts();
+
             // Generate course using AI.
-            $api = new Api();
+            $api = new api();
             $coursedata = $api->generateCourseOutline(
                 $topic,
                 $level,
@@ -164,16 +231,20 @@ try {
                 $includeassignment,
                 $providerid > 0 ? $providerid : null,
                 $model ?: null,
-                $extractedcontent ?: null,
+                null,
                 $customtitle ?: null,
                 $useemojis,
-                $usesvg,
-                $approvedplan
+                $usediagrams,
+                $approvedplan,
+                $counts
             );
 
-            // Carry H5P preferences through to publish.
+            // Carry H5P preferences through to publish. When H5P is on, the license was already
+            // validated by the gate above, so we trust the form value here.
             $coursedata->_include_h5p  = $includeh5p;
             $coursedata->_h5p_types    = $h5ptypes;
+            // Carry the count rules so publish can clamp activity counts to the course-wide caps.
+            $coursedata->_counts       = $counts;
 
             courseagent_write_progress(3, 95, get_string('progress_finalizing', 'local_courseagent'));
 
@@ -181,14 +252,13 @@ try {
             global $SESSION;
             $SESSION->courseagent_preview = $coursedata;
 
-            courseagent_write_progress(3, 100, get_string('progress_complete', 'local_courseagent'));
-
             echo json_encode([
-                'success'       => true,
-                'data'          => $coursedata,
-                'used_provider' => $coursedata->_used_provider_name ?? null,
-                'used_model'    => $coursedata->_used_model ?? null,
-                'fallback_log'  => $coursedata->_fallback_log ?? [],
+                'success'         => true,
+                'data'            => $coursedata,
+                'used_provider'   => $coursedata->_used_provider_name ?? null,
+                'used_model'      => $coursedata->_used_model ?? null,
+                'fallback_log'    => $coursedata->_fallback_log ?? [],
+                'license_warning' => $licensewarning,
             ]);
             break;
 
@@ -201,15 +271,28 @@ try {
                 throw new Exception(get_string('error_invalid_json', 'local_courseagent'));
             }
 
-            $api = new Api();
+            // Paid-feature gate: only validate when this publish actually creates H5P activities.
+            // The course is already generated by this point, so on any license failure we degrade
+            // (skip H5P, keep the course) rather than block — never throw away the user's work.
+            $publishlicensewarning = null;
+            if (!empty($coursedata->_include_h5p) && !empty(get_config('local_courseagent', 'saas_api_key'))) {
+                $lic = $preflightlicense();
+                if ($lic !== null) {
+                    $coursedata->_include_h5p = false;
+                    $publishlicensewarning = $lic['payload']['error'];
+                }
+            }
+
+            $api = new api();
             $result = $api->publishCourse($coursedata);
             $courseurl = new moodle_url('/course/view.php', ['id' => $result['courseid']]);
 
             echo json_encode([
-                'success'      => true,
-                'course_id'    => $result['courseid'],
-                'course_url'   => $courseurl->out(false),
-                'h5p_warnings' => $result['h5p_warnings'],
+                'success'         => true,
+                'course_id'       => $result['courseid'],
+                'course_url'      => $courseurl->out(false),
+                'h5p_warnings'    => $result['h5p_warnings'],
+                'license_warning' => $publishlicensewarning,
             ]);
             break;
 
@@ -311,37 +394,6 @@ try {
             ]);
             break;
 
-        case 'extract_content':
-            // Extract text from an uploaded file.
-            if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-                $errcodes = [
-                    UPLOAD_ERR_INI_SIZE   => get_string('upload_err_ini_size', 'local_courseagent'),
-                    UPLOAD_ERR_FORM_SIZE  => get_string('upload_err_form_size', 'local_courseagent'),
-                    UPLOAD_ERR_PARTIAL    => get_string('upload_err_partial', 'local_courseagent'),
-                    UPLOAD_ERR_NO_FILE    => get_string('upload_err_no_file', 'local_courseagent'),
-                    UPLOAD_ERR_NO_TMP_DIR => get_string('upload_err_no_tmp_dir', 'local_courseagent'),
-                    UPLOAD_ERR_CANT_WRITE => get_string('upload_err_cant_write', 'local_courseagent'),
-                    UPLOAD_ERR_EXTENSION  => get_string('upload_err_extension', 'local_courseagent'),
-                ];
-                $code = $_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE;
-                throw new Exception($errcodes[$code] ?? get_string('upload_err_generic', 'local_courseagent', $code));
-            }
-
-            $tmppath  = $_FILES['file']['tmp_name'];
-            $filename = $_FILES['file']['name'];
-            $maxchars = 100000;
-
-            $extractor = new local_courseagent\extractor();
-            $text = $extractor->extract($tmppath, $filename, $maxchars);
-
-            echo json_encode([
-                'success'  => true,
-                'text'     => $text,
-                'charcount' => mb_strlen($text),
-                'filename' => $filename,
-            ]);
-            break;
-
         case 'edit_item':
         case 'ai_assist':
             // AI chat assistant or legacy targeted edit.
@@ -364,7 +416,7 @@ try {
                 throw new \Exception(get_string('error_no_preview_data', 'local_courseagent'));
             }
 
-            $api = new Api();
+            $api = new api();
 
             if ($action === 'ai_assist') {
                 if (empty($userprompt)) {
@@ -414,6 +466,180 @@ try {
             global $SESSION;
             $SESSION->courseagent_chat_history = [];
             echo json_encode(['success' => true]);
+            break;
+
+        case 'get_site_documents':
+            // Fetch ready documents from the SaaS document library for this site.
+            // Pre-flight license check — this action is paid-only, so any failure blocks.
+            $lic = $preflightlicense();
+            if ($lic !== null) {
+                echo json_encode($lic['payload']);
+                break;
+            }
+            $saaskey = get_config('local_courseagent', 'saas_api_key');
+            $saasurl = defined('COURSEAGENT_SAAS_URL') ? rtrim(COURSEAGENT_SAAS_URL, '/') : 'https://api.courseagent.io';
+
+            $ch = curl_init($saasurl . '/api/v1/documents');
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => \local_courseagent\saas_http::headers($saaskey),
+                CURLOPT_TIMEOUT        => 15,
+            ]);
+            $responseraw = curl_exec($ch);
+            $httpcode    = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlerr     = curl_error($ch);
+            curl_close($ch);
+
+            if ($curlerr || $httpcode >= 400) {
+                $errmsg = $curlerr ?: ('HTTP ' . $httpcode . ': ' . ($responseraw ?: 'no response'));
+                echo json_encode(['success' => false, 'error' => 'Could not fetch documents: ' . $errmsg]);
+                break;
+            }
+
+            $docs = json_decode($responseraw, true);
+            if (!is_array($docs)) {
+                echo json_encode(['success' => false, 'error' => 'Unexpected response from document library.']);
+                break;
+            }
+            // Filter to only ready documents.
+            $ready = array_values(array_filter($docs, fn($d) => ($d['status'] ?? '') === 'ready'));
+            echo json_encode(['success' => true, 'documents' => $ready]);
+            break;
+
+        case 'generate_course_from_docs':
+            // Step 1: generate outline. Step 2 (approve + generate) called separately.
+            // Pre-flight license check — this action is paid-only, so any failure blocks.
+            $lic = $preflightlicense();
+            if ($lic !== null) {
+                echo json_encode($lic['payload']);
+                break;
+            }
+            $saaskey  = get_config('local_courseagent', 'saas_api_key');
+            $saasurl  = defined('COURSEAGENT_SAAS_URL') ? rtrim(COURSEAGENT_SAAS_URL, '/') : 'https://api.courseagent.io';
+            $step     = optional_param('step', 'outline', PARAM_ALPHA);
+            $courseid = optional_param('courseid', 0, PARAM_INT);
+            $rawdocids = optional_param('doc_ids', '', PARAM_RAW);
+            $docids   = array_values(array_filter(array_map('trim', explode(',', $rawdocids))));
+            $title    = optional_param('title', '', PARAM_TEXT);
+            $description = optional_param('description', '', PARAM_TEXT);
+            $audience = optional_param('audience', 'learners', PARAM_TEXT);
+
+            if (empty($docids)) {
+                echo json_encode(['success' => false, 'error' => 'Select at least one document.']);
+                break;
+            }
+            if (empty($title)) {
+                echo json_encode(['success' => false, 'error' => 'Course title is required.']);
+                break;
+            }
+
+            if ($step === 'outline') {
+                $payload = json_encode([
+                    'course_id'   => (string) $courseid,
+                    'doc_ids'     => $docids,
+                    'title'       => $title,
+                    'description' => $description,
+                    'audience'    => $audience,
+                ]);
+                $ch = curl_init($saasurl . '/api/v1/courses/generate');
+            } else {
+                // Step 2: approve outline and generate full course.
+                $outlinejson = optional_param('outline', '', PARAM_RAW);
+                $outline     = json_decode($outlinejson, true);
+                if (empty($outline)) {
+                    echo json_encode(['success' => false, 'error' => 'Invalid outline data.']);
+                    break;
+                }
+                $payload = json_encode([
+                    'course_id' => (string) $courseid,
+                    'doc_ids'   => $docids,
+                    'outline'   => $outline,
+                ]);
+                $ch = curl_init($saasurl . '/api/v1/courses/generate/approve');
+            }
+
+            curl_setopt_array($ch, [
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => $payload,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => array_merge(
+                    \local_courseagent\saas_http::headers($saaskey),
+                    ['Content-Type: application/json']
+                ),
+                CURLOPT_TIMEOUT => 120,
+            ]);
+            $responseraw = curl_exec($ch);
+            $httpcode    = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlerr     = curl_error($ch);
+            curl_close($ch);
+
+            if ($curlerr) {
+                echo json_encode(['success' => false, 'error' => 'Request failed: ' . $curlerr]);
+                break;
+            }
+            if ($httpcode === 402) {
+                echo json_encode(['success' => false, 'error' => 'RAG course generation requires a Pro plan.']);
+                break;
+            }
+            if ($httpcode >= 400) {
+                $errdata = json_decode($responseraw, true);
+                $errmsg  = $errdata['detail'] ?? ('HTTP ' . $httpcode);
+                echo json_encode(['success' => false, 'error' => $errmsg]);
+                break;
+            }
+
+            $result = json_decode($responseraw, true);
+            if (!$result) {
+                echo json_encode(['success' => false, 'error' => 'Could not parse response from course builder.']);
+                break;
+            }
+            echo json_encode(['success' => true, 'result' => $result]);
+            break;
+
+        case 'test_license_key':
+            require_capability('moodle/site:config', $context);
+            $saasurl = defined('COURSEAGENT_SAAS_URL')
+                ? rtrim(COURSEAGENT_SAAS_URL, '/')
+                : 'https://api.courseagent.io';
+            $apikey = get_config('local_courseagent', 'saas_api_key') ?: '';
+            if (empty($apikey)) {
+                echo json_encode(['success' => false, 'message' => 'No license key configured.']);
+                break;
+            }
+            $curl = new \curl(['ignoresecurity' => true]);
+            $curl->setHeader(\local_courseagent\saas_http::headers($apikey));
+            $resp = $curl->get($saasurl . '/api/v1/sites/usage');
+            $curlinfo = $curl->get_info();
+            $httpcode = (int)($curlinfo['http_code'] ?? 0);
+            if ($httpcode === 200) {
+                $data = json_decode($resp ?? '', true) ?? [];
+                $plan = $data['plan'] ?? 'unknown';
+                // Activation: persist the verified plan. Paid plans unlock features; anything
+                // else (none/unknown) locks them.
+                set_config('saas_plan', in_array($plan, ['starter', 'pro'], true) ? $plan : 'none', 'local_courseagent');
+                echo json_encode([
+                    'success' => true,
+                    'plan'    => $plan,
+                    'used'    => $data['used_this_month'] ?? 0,
+                    'limit'   => $data['limit'] ?? '&infin;',
+                ]);
+            } else if ($httpcode === 403) {
+                set_config('saas_plan', 'none', 'local_courseagent');
+                $body = json_decode((string)$resp, true);
+                $detail = is_array($body) ? ($body['detail'] ?? '') : '';
+                echo json_encode([
+                    'success'  => false,
+                    'httpcode' => $httpcode,
+                    'detail'   => $detail,
+                ]);
+            } else {
+                // 401/404 are definitive (bad key) — lock features. Network (0) and 5xx are
+                // transient — leave any previously activated plan untouched.
+                if ($httpcode === 401 || $httpcode === 404) {
+                    set_config('saas_plan', 'none', 'local_courseagent');
+                }
+                echo json_encode(['success' => false, 'httpcode' => $httpcode]);
+            }
             break;
 
         default:

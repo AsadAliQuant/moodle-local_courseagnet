@@ -43,32 +43,32 @@ $string['coursetopic_help'] = 'Describe the topic the AI should build the course
 
 // Index page strings.
 $string['configure_settings'] = 'Configure your AI-generated curriculum settings.';
+$string['core_settings'] = 'Core Settings';
+$string['content_generation_rules'] = 'Content Generation Rules';
 $string['course_title'] = 'Course Title';
 $string['optional_override'] = '(Optional override)';
 $string['course_title_placeholder'] = 'Leave blank to let the AI choose a title';
-$string['upload_content'] = 'Upload Your Content';
-$string['pro_badge'] = 'PRO';
-$string['upload_content_desc'] = 'Upload a document and let the AI build the course directly from your material.';
-$string['click_to_upload'] = 'Click to upload';
-$string['or_drag_drop'] = 'or drag & drop';
-$string['accepted_file_types'] = 'TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, EPUB &mdash; max&nbsp;50&nbsp;MB';
-$string['pro_feature'] = 'Pro Feature';
-$string['pro_feature_desc'] = 'Document upload is available in the <strong>Pro version</strong>.<br>Upgrade to unlock this and other advanced features.';
 $string['difficulty_level'] = 'Difficulty Level';
 $string['level_beginner'] = 'Beginner';
 $string['level_intermediate'] = 'Intermediate';
 $string['level_advanced'] = 'Advanced';
 $string['num_sections'] = 'Number of Sections';
 $string['sections_range'] = 'Between 2 and {$a} sections.';
-$string['included_components'] = 'Included Components';
+$string['included_components'] = 'Included Activities';
+$string['content_generation_rules_desc'] = 'Pick which activities the AI adds and how many. Turn on "Per section" to set how many each section gets, "Total across course" to cap the whole course, or both.';
 $string['include_quizzes'] = 'Include Quizzes';
-$string['include_quizzes_desc'] = 'Generate MCQs at the end of each section';
+$string['include_quizzes_desc'] = 'Add quiz questions so learners can test what they have learned.';
 $string['include_assignments_label'] = 'Include Assignments';
-$string['include_assignments_desc_ui'] = 'Create practical tasks for learners';
+$string['include_assignments_desc_ui'] = 'Add hands-on tasks for learners to complete and submit.';
+// Generic sub-option labels reused by every activity rule (quiz / assignment / H5P).
+$string['per_section_label'] = 'Per section / module';
+$string['per_section_desc'] = 'How many to create in every single section.';
+$string['total_course_label'] = 'Total across course';
+$string['total_course_desc'] = 'Set a limit for the whole course combined.';
 $string['use_emojis_label'] = 'Use Emojis';
 $string['use_emojis_desc_ui'] = 'Add relevant emojis to make content more engaging';
-$string['include_svg_diagrams'] = 'Include SVG Diagrams';
-$string['include_svg_desc_ui'] = 'Generate simple SVG illustrations where helpful';
+$string['include_diagrams'] = 'Include Diagrams';
+$string['include_diagrams_desc_ui'] = 'AI generates Mermaid diagrams (flowcharts, timelines, etc.) where helpful';
 $string['ai_provider'] = 'AI Provider';
 $string['model_selection'] = 'Model Selection';
 $string['generate_course_btn'] = 'Generate Course';
@@ -83,10 +83,7 @@ $string['review_refine_desc'] = 'You can edit everything before finalizing and p
 $string['pro_tip'] = 'Pro Tip:';
 $string['pro_tip_desc'] = 'Be as specific as possible in the Topic field. Pasting a syllabus outline yields the best results.';
 $string['generating_course'] = 'Generating Your Course...';
-$string['generating_course_desc'] = "This may take a few seconds. We're crafting high-quality content for you.";
-$string['step_outline'] = 'Creating course outline';
-$string['step_lessons'] = 'Generating lessons';
-$string['step_extras'] = 'Adding quizzes and assignments';
+$string['generating_course_desc'] = "This can take a few minutes. We're crafting high-quality content for you.";
 $string['cancel'] = 'Cancel';
 
 // My courses page strings.
@@ -104,20 +101,10 @@ $string['disable_provider'] = 'Disable provider';
 $string['enable_provider'] = 'Enable provider';
 
 // AJAX endpoint strings.
-$string['error_no_topic'] = 'Please enter a course topic or upload a document.';
+$string['error_no_topic'] = 'Please enter a course topic.';
 $string['progress_preparing'] = 'Preparing course outline...';
 $string['progress_finalizing'] = 'Finalizing course...';
-$string['progress_complete'] = 'Course generated successfully!';
 $string['provider_not_found'] = 'Provider not found';
-$string['upload_err_ini_size'] = 'File exceeds server upload_max_filesize.';
-$string['upload_err_form_size'] = 'File exceeds form MAX_FILE_SIZE.';
-$string['upload_err_partial'] = 'File was only partially uploaded.';
-$string['upload_err_no_file'] = 'No file was uploaded.';
-$string['upload_err_no_tmp_dir'] = 'Missing temporary folder.';
-$string['upload_err_cant_write'] = 'Failed to write file to disk.';
-$string['upload_err_extension'] = 'A PHP extension stopped the upload.';
-$string['upload_err_generic'] = 'File upload failed (code {$a})';
-
 // Provider form strings.
 $string['baseurl_placeholder'] = 'https://api.openai.com/v1';
 $string['endpoint_placeholder'] = 'chat/completions';
@@ -140,20 +127,11 @@ $string['send'] = 'Send';
 // JS-accessible strings (passed via config from PHP).
 $string['js:auto_select'] = 'Auto-select';
 $string['js:auto_select_first'] = 'Auto-select (first available)';
-$string['js:unsupported_filetype'] = 'Unsupported file type ".{$a}". Please upload: TXT, PDF, DOCX, PPTX, ODT, RTF, MD, CSV, or EPUB.';
-$string['js:file_too_large'] = 'File is too large ({$a}). Maximum allowed size is 50 MB.';
-$string['js:could_not_extract'] = 'Could not extract text from the file.';
-$string['js:upload_failed'] = 'Failed to upload file for extraction.';
-$string['js:extracting_text'] = 'Extracting text...';
-$string['js:characters_extracted'] = '{$a} characters extracted';
 $string['js:please_enter_topic'] = 'Please enter a course topic.';
 $string['js:sections_range_error'] = 'Number of sections must be between 2 and {$a}';
 $string['js:failed_generate'] = 'Failed to generate course';
 $string['js:error_generating'] = 'An error occurred while generating the course';
 $string['js:generation_cancelled'] = 'Course generation cancelled.';
-$string['js:adding_quizzes_assignments'] = 'Adding quizzes and assignments';
-$string['js:adding_quizzes'] = 'Adding quizzes';
-$string['js:adding_assignments'] = 'Adding assignments';
 $string['js:ai_initial_msg'] = "I've drafted the initial content for the course. Review the sections in the sidebar and let me know if you'd like any changes.";
 $string['js:quickaction_1'] = 'Add 10 more questions to section 2 quiz';
 $string['js:quickaction_2'] = 'Remove assignment from section 3';
@@ -209,6 +187,17 @@ $string['js:h5p_accordion'] = 'H5P: Accordion';
 $string['js:h5p_personality_quiz'] = 'H5P: Personality Quiz';
 $string['js:h5p_chart'] = 'H5P: Chart';
 $string['js:h5p_timeline'] = 'H5P: Timeline';
+$string['js:h5p_subheading'] = 'The AI will analyse your course content and modules, then automatically select the most suitable activity type for each section — no manual selection needed.';
+$string['js:h5p_per_section_label'] = 'H5P activities per section/module';
+$string['js:h5p_total_label'] = 'Total H5P activities across course';
+// Generic sub-option labels for the JS-injected H5P slider block (mirror the PHP ones above).
+$string['js:per_section_label'] = 'Per section / module';
+$string['js:per_section_desc'] = 'How many to create in every single section.';
+$string['js:total_course_label'] = 'Total across course';
+$string['js:total_course_desc'] = 'Set a limit for the whole course combined.';
+$string['js:selected_activity_types'] = 'Selected Activity Types';
+$string['js:select_all'] = 'Select all';
+$string['js:deselect_all'] = 'Deselect all';
 
 // License settings strings.
 $string['saas_heading'] = 'CourseAgent License';
@@ -218,13 +207,48 @@ $string['saas_api_key_desc'] = 'Your CourseAgent license key, received when acti
 
 // H5P activity toggle on course creation form.
 $string['include_h5p'] = 'Generate H5P Activities';
-$string['include_h5p_desc'] = 'Generate interactive H5P activities for each section (requires a license key)';
+$string['include_h5p_desc'] = 'Add rich interactive activities — drag &amp; drop, flashcards, crosswords and more (requires a license key).';
 
-// SaaS error messages (user-visible).
+// Quizzes / Assignments min/max labels (course generation form).
+$string['quiz_per_section_label'] = 'Quizzes per section/module';
+$string['quiz_total_label'] = 'Total quizzes across course';
+$string['assignment_per_section_label'] = 'Assignments per section/module';
+$string['assignment_total_label'] = 'Total assignments across course';
+
+// CourseAgent API error messages (user-visible).
 $string['h5p_quota_exceeded'] = 'Monthly H5P generation limit reached. Upgrade your plan to continue.';
 $string['h5p_paid_feature'] = 'H5P activity generation requires a paid CourseAgent plan. Contact your administrator to upgrade.';
 $string['h5p_rate_limited'] = 'Too many requests to the H5P service. Please try again shortly.';
 $string['h5p_service_unavailable'] = 'H5P generation service is temporarily unavailable. The course was published without H5P activities.';
+$string['h5p_invalid_key'] = 'The license key entered is not valid. Please check your key or contact support.';
+$string['h5p_no_plan'] = 'Your site is not on an active paid plan. You cannot use paid features. Request a plan from your CourseAgent dashboard.';
+$string['h5p_plan_restriction'] = 'This feature is not included in your current plan. Request an upgrade from your CourseAgent dashboard.';
+
+// License key validation / test connection strings.
+$string['saas_key_invalid'] = 'Invalid license key. Please check the key and try again.';
+$string['saas_key_network_error'] = 'Key saved, but could not verify it right now. Use the Test Connection button to verify.';
+$string['saas_test_btn'] = 'Test Connection';
+$string['saas_test_loading'] = 'Testing...';
+$string['saas_test_failed'] = 'Connection failed. Key may be invalid or the service is unreachable.';
+
+// License activation strings.
+$string['saas_activate_btn'] = 'Activate License';
+$string['saas_activate_loading'] = 'Activating...';
+$string['saas_activated'] = 'Activated &mdash; {$a} plan';
+$string['saas_activate_no_plan'] = 'Key is valid but has no active paid plan. Request a plan from your CourseAgent dashboard.';
+$string['saas_activate_failed'] = 'Activation failed. Key may be invalid or the service is unreachable.';
+
+// Pre-flight license validation messages (shown when a course-creation flow starts).
+$string['license_invalid_msg'] = 'H5P activity generation needs a valid CourseAgent license key, and yours is invalid or no longer active. Open plugin settings to remove or replace the key, or turn off H5P activity generation to create your course with the free features.';
+$string['license_no_plan_msg'] = 'H5P activity generation needs an active plan, and your CourseAgent license key has none attached. Request a plan from your CourseAgent dashboard, or turn off H5P activity generation to create your course with the free features.';
+$string['license_network_msg'] = 'H5P activity generation needs the CourseAgent service, which can\'t be reached right now. Your license key is saved and intact. Turn off H5P activity generation to create your course with the free features, or try again once the service is back.';
+$string['license_service_msg'] = 'H5P activity generation needs the CourseAgent service, which is temporarily unavailable. Your license key is fine. Turn off H5P activity generation to create your course with the free features, or try again once the service is back.';
+$string['license_origin_mismatch_msg'] = 'This license key was registered for a different Moodle site URL. Either re-register this Moodle site to get a new key, or use the key on the site it was registered for.';
+
+// JS-accessible strings for the license error notification.
+$string['js:license_fix_instruction'] = 'Open plugin settings to remove or replace your license key, then try again.';
+$string['js:license_open_settings'] = 'Open plugin settings';
+$string['js:license_transient_instruction'] = 'Disable H5P activity generation above to continue with free features, or try again once connectivity is restored.';
 
 // Settings strings.
 $string['settings'] = 'Course Agent Settings';
@@ -237,8 +261,8 @@ $string['enable_assignments'] = 'Enable Assignment Generation';
 $string['enable_assignments_desc'] = 'When enabled, AI will generate assignments for each section.';
 $string['use_emojis'] = 'Use Emojis';
 $string['use_emojis_desc'] = 'Add relevant emojis throughout the content to make it more engaging.';
-$string['use_svg'] = 'Include SVG Diagrams';
-$string['use_svg_desc'] = 'Generate simple SVG illustrations and diagrams where helpful for explanations.';
+$string['use_diagrams'] = 'Include Diagrams';
+$string['use_diagrams_desc'] = 'AI generates Mermaid.js diagrams (flowcharts, timelines, sequence diagrams, etc.) inside lesson content where helpful.';
 
 // Provider management strings.
 $string['provider_management'] = 'AI Provider Management';

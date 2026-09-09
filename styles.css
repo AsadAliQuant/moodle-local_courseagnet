@@ -8,42 +8,6 @@
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-/* ── Dropzone shell (dashed border cannot be done with Bootstrap alone) ── */
-.courseagent-dropzone {
-    border: 2px dashed #ced4da;
-    border-radius: .375rem;
-    padding: 1.5rem;
-    text-align: center;
-    background: #f8f9fa;
-}
-
-/* Faded locked state */
-.courseagent-dropzone--locked {
-    opacity: .38;
-    pointer-events: none;
-    user-select: none;
-    filter: grayscale(50%);
-}
-
-/* ── Pro overlay (requires position:absolute — no Bootstrap utility covers this) ── */
-.courseagent-pro-wrapper {
-    position: relative;
-}
-
-.courseagent-pro-overlay {
-    position: absolute;
-    inset: 0;                          /* top/right/bottom/left: 0 */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 255, 255, .85);
-    border: 2px dashed #ffc107;
-    border-radius: .375rem;
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    z-index: 1;
-}
-
 /* ── Preview section fade-in ── */
 #preview-content {
     animation: cagnet-fadein .25s ease;
@@ -174,69 +138,6 @@
     transform: translate(-50%, -50%);
     font-size: 1.75rem;
     color: #007bff;
-}
-
-/* ── Step list ── */
-.ca-steps-list {
-    display: flex;
-    flex-direction: column;
-    gap: .75rem;
-    text-align: left;
-}
-.ca-step {
-    display: flex;
-    align-items: center;
-    gap: .75rem;
-}
-.ca-step-bubble {
-    width: 2rem;
-    height: 2rem;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    font-size: .75rem;
-    font-weight: 600;
-}
-.ca-step-done .ca-step-bubble {
-    background: #fff;
-    border: 1px solid #007bff;
-    color: #007bff;
-}
-.ca-step-done .ca-step-label {
-    color: #212529;
-}
-.ca-step-active .ca-step-bubble {
-    background: #007bff;
-    color: #fff;
-    position: relative;
-}
-.ca-step-active .ca-step-bubble::after {
-    content: '';
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    border: 2px solid #007bff;
-    opacity: .4;
-    animation: ca-ping 1.5s cubic-bezier(0,0,.2,1) infinite;
-}
-@keyframes ca-ping {
-    75%, 100% { transform: scale(1.3); opacity: 0; }
-}
-.ca-step-active .ca-step-label {
-    color: #212529;
-    font-weight: 600;
-}
-.ca-step-pending {
-    opacity: .5;
-}
-.ca-step-pending .ca-step-bubble {
-    border: 1px solid #adb5bd;
-    color: #adb5bd;
-}
-.ca-step-pending .ca-step-label {
-    color: #6c757d;
 }
 
 /* ── Native Moodle layout overrides (preview page only) ── */
@@ -707,6 +608,18 @@ body.local-courseagent-preview-flush #page.drawers div[role="main"] {
     margin-bottom: .35rem;
 }
 
+.ca-assignment-instructions ul {
+    margin: .25rem 0 .25rem 1rem;
+    list-style: disc;
+}
+
+.ca-assignment-instructions code {
+    background: #eef2f7;
+    padding: .05rem .3rem;
+    border-radius: .25rem;
+    font-size: .9em;
+}
+
 .ca-meta {
     font-size: .9rem;
     color: #64748b;
@@ -1048,5 +961,708 @@ body.local-courseagent-preview-flush #page.drawers div[role="main"] {
     }
     .ca-chat {
         display: none;
+    }
+}
+
+/* ===========================================================================
+   Create page (index.php) — "Course Architect" layout
+   Accents track the active Moodle theme via Bootstrap 5 CSS variables
+   (--bs-primary / --bs-primary-rgb), falling back to the Boost default blue.
+   All rules are scoped under #courseagent-app so the preview page is untouched.
+   =========================================================================== */
+
+/* Suppress the default Moodle page header — the page renders its own header block. */
+body.local-courseagent-create #page-header {
+    display: none;
+}
+
+#courseagent-app {
+    max-width: 1180px;
+    margin: 0 auto;
+}
+
+/* ── Header & breadcrumb ── */
+#courseagent-app .ca-page-head {
+    margin-bottom: 1.75rem;
+}
+#courseagent-app .ca-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: .8rem;
+    line-height: 1;            /* normalize so text boxes aren't over-tall */
+    color: #6c757d;
+    margin-bottom: .5rem;
+}
+#courseagent-app .ca-breadcrumb a,
+#courseagent-app .ca-breadcrumb-current {
+    display: inline-flex;      /* collapse each item to glyph height */
+    align-items: center;
+    line-height: 1;
+}
+#courseagent-app .ca-breadcrumb a {
+    color: #6c757d;
+    text-decoration: none;
+}
+#courseagent-app .ca-breadcrumb a:hover {
+    color: var(--bs-primary, #0f6cbf);
+    text-decoration: underline;
+}
+#courseagent-app .ca-breadcrumb-sep {
+    display: inline-flex;      /* center the FA glyph on the shared axis */
+    align-items: center;
+    justify-content: center;
+    font-size: .7rem;          /* nudge up slightly so chevron weight matches text */
+    line-height: 1;
+    color: #adb5bd;
+    margin: 0 .45rem;
+    transform: translateY(.5px);
+}
+#courseagent-app .ca-breadcrumb-current {
+    color: #212529;
+    font-weight: 600;
+}
+#courseagent-app .ca-page-title {
+    font-size: 1.875rem;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -.02em;
+    margin: 0 0 .25rem;
+    color: #1a1c1e;
+}
+#courseagent-app .ca-page-subtitle {
+    font-size: 1rem;
+    color: #6c757d;
+    margin: 0;
+}
+
+/* ── Cards ── */
+#courseagent-app .ca-card {
+    border: 1px solid #e6e9ec;
+    border-radius: .75rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+#courseagent-app .ca-card > .card-body {
+    padding: 1.5rem;
+}
+#courseagent-app .ca-card-title {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #212529;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #e6e9ec;
+}
+#courseagent-app .ca-card-title-icon {
+    color: var(--bs-primary, #0f6cbf);
+    font-size: 1.1rem;
+}
+/* One-line explainer shown under a card title (e.g. Content Generation Rules) */
+#courseagent-app .ca-card-subtitle {
+    font-size: .85rem;
+    color: #6c757d;
+    line-height: 1.45;
+    margin-top: -1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* ── Field labels ── */
+#courseagent-app .ca-field-label {
+    display: block;
+    font-weight: 600;
+    font-size: .875rem;
+    margin-bottom: .4rem;
+    color: #343a40;
+}
+
+/* ── Custom select (ca-select) — polished listbox replacing native dropdowns ── */
+#courseagent-app .ca-select {
+    position: relative;
+    width: 100%;
+}
+/* Native <select> kept as the hidden source of truth; widget carries the ARIA. */
+#courseagent-app .ca-select__native {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+#courseagent-app .ca-select__trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    width: 100%;
+    padding: .5rem .85rem;
+    font-family: inherit;
+    font-size: .9rem;
+    line-height: 1.4;
+    color: #212529;
+    text-align: left;
+    background: #fff;
+    border: 1px solid #ced4da;
+    border-radius: .5rem;
+    cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+#courseagent-app .ca-select__trigger:hover {
+    border-color: rgba(var(--bs-primary-rgb, 15, 108, 191), .45);
+}
+#courseagent-app .ca-select__trigger:focus,
+#courseagent-app .ca-select.is-open .ca-select__trigger {
+    outline: none;
+    border-color: var(--bs-primary, #0f6cbf);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb, 15, 108, 191), .15);
+}
+#courseagent-app .ca-select__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#courseagent-app .ca-select__chevron {
+    flex-shrink: 0;
+    font-size: .7rem;
+    color: #94a3b8;
+    transition: transform .2s ease;
+}
+#courseagent-app .ca-select.is-open .ca-select__chevron {
+    transform: rotate(180deg);
+    color: var(--bs-primary, #0f6cbf);
+}
+
+/* Floating options panel */
+#courseagent-app .ca-select__panel {
+    position: absolute;
+    z-index: 1050;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: .35rem;
+    list-style: none;
+    max-height: 16rem;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: .5rem;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    pointer-events: none;
+    transition: opacity .15s ease, transform .15s ease, visibility .15s ease;
+}
+#courseagent-app .ca-select.is-open .ca-select__panel {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+/* Option rows */
+#courseagent-app .ca-select__option {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .5rem .6rem;
+    font-size: .85rem;
+    color: #334155;
+    border-radius: .375rem;
+    cursor: pointer;
+}
+#courseagent-app .ca-select__option:hover {
+    background: #f1f5f9;
+}
+#courseagent-app .ca-select__option.is-active {
+    background: #eef2ff;
+}
+#courseagent-app .ca-select__option.is-selected {
+    background: rgba(var(--bs-primary-rgb, 15, 108, 191), .12);
+    color: var(--bs-primary, #0f6cbf);
+    font-weight: 600;
+}
+#courseagent-app .ca-select__check {
+    flex-shrink: 0;
+    width: 1em;
+    font-size: .8rem;
+    opacity: 0;
+    color: var(--bs-primary, #0f6cbf);
+}
+#courseagent-app .ca-select__option.is-selected .ca-select__check {
+    opacity: 1;
+}
+#courseagent-app .ca-select__option-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Activity rule cards ── */
+#courseagent-app .ca-rules {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+#courseagent-app .ca-rule {
+    border: 1px solid #e2e6ea;
+    border-radius: .5rem;
+    background: #fff;
+    overflow: hidden;
+}
+#courseagent-app .ca-rule-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+}
+#courseagent-app .ca-rule-info {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    min-width: 0;
+}
+#courseagent-app .ca-rule-icon {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: .9rem;
+    background: rgba(var(--bs-primary-rgb, 15, 108, 191), .12);
+    color: var(--bs-primary, #0f6cbf);
+}
+#courseagent-app .ca-rule-icon--accent {
+    background: var(--bs-primary, #0f6cbf);
+    color: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+#courseagent-app .ca-rule-title {
+    font-weight: 600;
+    font-size: .9rem;
+    color: #212529;
+}
+#courseagent-app .ca-rule-title--accent {
+    color: var(--bs-primary, #0f6cbf);
+    font-weight: 700;
+}
+#courseagent-app .ca-rule-desc {
+    font-size: .78rem;
+    color: #6c757d;
+    line-height: 1.35;
+}
+
+/* Rule body strip (per-section / total sub-options) */
+#courseagent-app .ca-rule-body {
+    padding: 1.25rem;
+    border-top: 1px solid #eef1f3;
+    background: #fbfcfd;
+}
+#courseagent-app .ca-count-label {
+    display: block;
+    font-size: .72rem;
+    font-weight: 600;
+    color: #6c757d;
+    margin-bottom: .35rem;
+}
+#courseagent-app .ca-count-input {
+    width: 64px;
+    text-align: center;
+}
+#courseagent-app .ca-count-dash {
+    margin: 0 .45rem;
+    color: #adb5bd;
+}
+
+/* Simple toggle rules (Emojis / SVG) laid out two-up */
+#courseagent-app .ca-visuals {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+#courseagent-app .ca-rule--simple {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem;
+}
+
+/* Highlighted H5P rule */
+#courseagent-app .ca-rule--accent {
+    border-color: rgba(var(--bs-primary-rgb, 15, 108, 191), .35);
+}
+
+/* ── Sub-option blocks (Per section / Total across course) ── */
+/* Each activity rule body holds a 2-up grid of sub-options, each independently
+   toggleable. A disabled sub-option dims its slider but keeps its switch live. */
+#courseagent-app .ca-subopts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem 2rem;
+    width: 100%;
+}
+#courseagent-app .ca-subopt {
+    min-width: 0;
+}
+#courseagent-app .ca-subopt-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+#courseagent-app .ca-subopt-title {
+    font-size: .85rem;
+    font-weight: 600;
+    color: #212529;
+    line-height: 1.3;
+}
+#courseagent-app .ca-subopt-desc {
+    font-size: .72rem;
+    color: #6c757d;
+    line-height: 1.4;
+    margin-top: .15rem;
+}
+#courseagent-app .ca-subopt-switch {
+    flex-shrink: 0;
+    margin-top: .1rem;
+}
+/* Dimmed state: grey out + lock the slider, but the switch itself stays usable. */
+#courseagent-app .ca-subopt--off .ca-subopt-title,
+#courseagent-app .ca-subopt--off .ca-subopt-desc {
+    opacity: .55;
+}
+#courseagent-app .ca-subopt--off .ca-subopt-body {
+    opacity: .4;
+    filter: grayscale(65%);
+    pointer-events: none;
+}
+#courseagent-app .ca-subopt-body {
+    transition: opacity .2s ease, filter .2s ease;
+}
+
+/* ── Dual-handle range slider ── */
+/* Two overlaid native range inputs share one track; only the thumbs are
+   interactive (the inputs themselves are pointer-events:none) so both handles
+   stay independently draggable. Fill + value labels are painted by JS. */
+#courseagent-app .ca-range {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+#courseagent-app .ca-range-val {
+    flex-shrink: 0;
+    width: 1.25rem;
+    font-size: .8125rem;
+    font-weight: 600;
+    color: #6c757d;
+    text-align: center;
+}
+#courseagent-app .ca-range-track {
+    position: relative;
+    flex: 1;
+    height: 1rem;
+    display: flex;
+    align-items: center;
+}
+/* Base (unfilled) bar */
+#courseagent-app .ca-range-track::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 6px;
+    border-radius: 9999px;
+    background: #e0e3e5;
+}
+/* Selected (filled) range between the two thumbs */
+#courseagent-app .ca-range-fill {
+    position: absolute;
+    height: 6px;
+    border-radius: 9999px;
+    background: var(--bs-primary, #0f6cbf);
+    pointer-events: none;
+}
+/* The two overlapping range inputs */
+#courseagent-app .ca-range-input {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 1rem;
+    margin: 0;
+    padding: 0;
+    background: none;
+    -webkit-appearance: none;
+    appearance: none;
+    pointer-events: none;   /* only the thumb re-enables pointer events */
+}
+#courseagent-app .ca-range-input--min { z-index: 3; }
+#courseagent-app .ca-range-input--max { z-index: 4; }
+#courseagent-app .ca-range-input:focus {
+    outline: none;
+}
+/* Transparent native tracks — the visible bar is drawn by .ca-range-track */
+#courseagent-app .ca-range-input::-webkit-slider-runnable-track {
+    background: transparent;
+    border: none;
+    height: 1rem;
+}
+#courseagent-app .ca-range-input::-moz-range-track {
+    background: transparent;
+    border: none;
+    height: 1rem;
+}
+/* Thumbs */
+#courseagent-app .ca-range-input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    pointer-events: auto;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--bs-primary, #0f6cbf);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    cursor: pointer;
+    transition: transform .1s ease;
+}
+#courseagent-app .ca-range-input::-moz-range-thumb {
+    pointer-events: auto;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--bs-primary, #0f6cbf);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    cursor: pointer;
+    transition: transform .1s ease;
+}
+#courseagent-app .ca-range-input::-webkit-slider-thumb:hover { transform: scale(1.12); }
+#courseagent-app .ca-range-input::-moz-range-thumb:hover { transform: scale(1.12); }
+#courseagent-app .ca-range-input:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(var(--bs-primary-rgb, 15, 108, 191), .2);
+}
+#courseagent-app .ca-range-input:focus-visible::-moz-range-thumb {
+    box-shadow: 0 0 0 4px rgba(var(--bs-primary-rgb, 15, 108, 191), .2);
+}
+
+/* ── H5P chip selector (markup injected by coursecreator.js) ── */
+#courseagent-app .ca-h5p-selector {
+    border-top: 1px solid #eef1f3;
+    background: #fbfcfd;
+    padding: 1rem;
+}
+#courseagent-app .ca-h5p-subhead {
+    font-size: .78rem;
+    color: #6c757d;
+    margin-bottom: .75rem;
+}
+#courseagent-app .ca-h5p-pill-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: .65rem;
+}
+#courseagent-app .ca-h5p-pill-head-label {
+    font-size: .82rem;
+    font-weight: 600;
+    color: #343a40;
+}
+#courseagent-app .ca-h5p-pill-actions a {
+    font-size: .75rem;
+    color: var(--bs-primary, #0f6cbf);
+}
+#courseagent-app .ca-h5p-pill-actions .ca-h5p-sep {
+    color: #ced4da;
+    margin: 0 .25rem;
+}
+#courseagent-app .ca-h5p-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+/* H5P chips — Bootstrap btn-check toggle buttons; selected state driven by CSS :checked. */
+#courseagent-app .ca-h5p-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .375rem;
+    margin: 0;
+    padding: .375rem .75rem;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    font-size: .75rem;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    background: #e6e8ea;
+    color: #45464d;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+    transition: background-color .15s ease, color .15s ease, box-shadow .15s ease;
+}
+#courseagent-app .ca-h5p-pill:hover {
+    background: #d8dadc;
+    color: #45464d;
+}
+#courseagent-app .h5p-type-check:checked + .ca-h5p-pill {
+    background: var(--bs-primary, #0f6cbf);
+    color: #fff;
+    box-shadow: 0 2px 4px rgba(var(--bs-primary-rgb, 15, 108, 191), .25);
+}
+#courseagent-app .h5p-type-check:checked + .ca-h5p-pill:hover {
+    color: #fff;
+    filter: brightness(.96);
+}
+#courseagent-app .h5p-type-check:focus-visible + .ca-h5p-pill {
+    outline: 2px solid var(--bs-primary, #0f6cbf);
+    outline-offset: 2px;
+}
+/* Keep the raw checkbox hidden even if Moodle's Bootstrap build lacks the .btn-check reset. */
+#courseagent-app .h5p-type-check.btn-check {
+    position: absolute;
+    clip: rect(0, 0, 0, 0);
+    pointer-events: none;
+}
+#courseagent-app .ca-h5p-pill-check {
+    display: none;
+    font-size: .7rem;
+    line-height: 1;
+}
+#courseagent-app .h5p-type-check:checked + .ca-h5p-pill .ca-h5p-pill-check {
+    display: inline-block;
+}
+#courseagent-app .ca-h5p-counts {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eef1f3;
+}
+
+/* ── AI engine + actions card ── */
+#courseagent-app .ca-engine {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+#courseagent-app .ca-engine-fields {
+    flex: 1 1 auto;
+    margin: 0;
+}
+#courseagent-app .ca-engine-action .btn {
+    width: 100%;
+    white-space: nowrap;
+}
+@media (min-width: 768px) {
+    #courseagent-app .ca-engine {
+        flex-direction: row;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 1.5rem;
+    }
+    #courseagent-app .ca-engine-action {
+        flex-shrink: 0;
+    }
+    #courseagent-app .ca-engine-action .btn {
+        width: auto;
+    }
+}
+
+/* ── Sidebar: How it works timeline ── */
+#courseagent-app .ca-sidebar-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #212529;
+    margin-bottom: 1rem;
+}
+#courseagent-app .ca-timeline {
+    position: relative;
+    border-left: 2px solid #e6e9ec;
+    margin-left: .875rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+#courseagent-app .ca-timeline-step {
+    position: relative;
+    padding-left: 1.5rem;
+}
+#courseagent-app .ca-timeline-dot {
+    position: absolute;
+    left: -.95rem;
+    top: 0;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background: linear-gradient(rgba(var(--bs-primary-rgb, 15, 108, 191), .15), rgba(var(--bs-primary-rgb, 15, 108, 191), .15)), #fff;
+    color: var(--bs-primary, #0f6cbf);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: .8rem;
+    font-weight: 700;
+    box-shadow: 0 0 0 4px #fff;
+}
+#courseagent-app .ca-timeline-step-title {
+    font-size: .9rem;
+    font-weight: 600;
+    color: #212529;
+    margin-bottom: .25rem;
+}
+#courseagent-app .ca-timeline-step-desc {
+    font-size: .8rem;
+    color: #6c757d;
+    line-height: 1.5;
+    margin-bottom: 0;
+}
+
+/* ── Sidebar: Pro tip callout ── */
+#courseagent-app .ca-protip {
+    display: flex;
+    align-items: flex-start;
+    gap: .75rem;
+    padding: 1.25rem;
+    border-radius: .75rem;
+    background: rgba(var(--bs-primary-rgb, 15, 108, 191), .07);
+    border: 1px solid rgba(var(--bs-primary-rgb, 15, 108, 191), .2);
+}
+#courseagent-app .ca-protip-icon {
+    color: var(--bs-primary, #0f6cbf);
+    font-size: 1.1rem;
+    margin-top: .15rem;
+    flex-shrink: 0;
+}
+#courseagent-app .ca-protip-title {
+    font-size: .85rem;
+    font-weight: 700;
+    color: var(--bs-primary, #0f6cbf);
+    margin-bottom: .25rem;
+}
+#courseagent-app .ca-protip-text {
+    font-size: .8rem;
+    color: #495057;
+    line-height: 1.5;
+    margin-bottom: 0;
+}
+
+/* ── Responsive ── */
+@media (max-width: 575.98px) {
+    #courseagent-app .ca-visuals {
+        grid-template-columns: 1fr;
+    }
+    #courseagent-app .ca-subopts {
+        grid-template-columns: 1fr;
+        gap: 1.25rem;
+    }
+    #courseagent-app .ca-page-title {
+        font-size: 1.5rem;
     }
 }

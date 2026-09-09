@@ -31,8 +31,13 @@ namespace local_courseagent;
 /**
  * Extracts readable plain text from uploaded documents.
  * Supported: TXT, MD, CSV, RTF, DOCX, PPTX, ODT, EPUB, PDF (basic).
+ *
+ * Class name is lowercase to match the file name (extractor.php). Moodle's
+ * autoloader maps `local_courseagent\Extractor` to `classes/Extractor.php`
+ * literally, breaking on case-sensitive filesystems (Linux).
  */
-class Extractor
+// phpcs:ignore Squiz.Classes.ValidClassName.NotCamelCaps,PSR1.Classes.ClassDeclaration.MissingNamespace
+class extractor
 {
     /**
      * Extract text from an uploaded file.

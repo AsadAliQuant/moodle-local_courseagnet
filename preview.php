@@ -77,6 +77,7 @@ $jsconfig = [
     ],
 ];
 $PAGE->requires->css(new moodle_url('/local/courseagent/styles.css'));
+$PAGE->requires->js(new moodle_url('/local/courseagent/amd/build/mermaid.min.js'));
 
 // Use inline script tag for large config data (Moodle best practice).
 // js_call_amd has 1024 char limit on argument string.
@@ -112,6 +113,8 @@ $jsconfig = [
         'failedPublish'         => get_string('js:failed_publish', 'local_courseagent'),
         'errorPublishing'       => get_string('js:error_publishing', 'local_courseagent'),
         'untitledCourse'        => get_string('untitled_course', 'local_courseagent'),
+        'licenseFixInstruction' => get_string('js:license_fix_instruction', 'local_courseagent'),
+        'licenseOpenSettings'   => get_string('js:license_open_settings', 'local_courseagent'),
     ],
 ];
 echo '<script type="application/json" id="ca-config-data">' . json_encode($jsconfig) . '</script>';
@@ -201,5 +204,14 @@ echo $OUTPUT->header();
     <?php endif; ?>
 </div>
 
-<?php echo $OUTPUT->footer();
+<?php
+echo html_writer::script(
+    'document.addEventListener("DOMContentLoaded",function(){' .
+    '  if(typeof mermaid!=="undefined"){' .
+    '    mermaid.initialize({startOnLoad:false,theme:"default",securityLevel:"loose"});' .
+    '    mermaid.run({querySelector:".mermaid"});' .
+    '  }' .
+    '})'
+);
+echo $OUTPUT->footer();
 
